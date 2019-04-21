@@ -148,7 +148,7 @@ protocol period `T`시간동안 `M_i`이 `M_j`에게 `ping`을 보내는데 성�
 
 #### Why Suspicion Mechanism
 
-Lifeguard 개념에 대해서 설명하기 전에 Suspicion 메커니즘이 왜 등장했는지에 대해서 먼저 생각해보자. 첫 번째로 *flapping problem*이 있다. **flapping problem**은 정상적으로 동작하는 노드를 실패했라고 체크하는 문제이다. 그래서 보통 로그 어디에도 해당 노드가 실패했다고 나오지 않는다. 그렇지만 네트워크 내의 노드들은 정상적으로 동작하는 노드를 실패했다고 체크해놓는다.
+Lifeguard 개념에 대해서 설명하기 전에 Suspicion 메커니즘이 왜 등장했는지에 대해서 먼저 생각해보자. 첫 번째로 *flapping problem*이 있다. **flapping problem**은 정상적으로 동작하는 노드를 실패했다라고 체크하는 문제이다. 그래서 보통 로그 어디에도 해당 노드가 실패했다고 나오지 않는다. 그렇지만 네트워크 내의 노드들은 정상적으로 동작하는 노드를 실패했다고 체크해놓는다.
 
 두 번째는 네트워크 내의 정상적으로 동작하지만 속도가 느린 프로세스에 대해서 실패했다고 판단하는 false positive를 낮추기 위해서이다. 어떤 노드가 다른 노드에게 probe를 하였을 때 최초로 timeout에 걸리면 그 노드를 dead 노드라고 판단하지말고 suspect 노드로 생각한다. 위와 같이 alive와 dead 사이에 suspect라는 한 가지 상태를 더 두어서 최초로 probe를 받은 대상 노드가 속도가 느린 경우를 감안하기 때문에 Suspicion Mechanism이 없는 네트워크보다 false positive가 낮아지게 된다.
 
