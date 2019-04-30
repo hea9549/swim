@@ -304,7 +304,11 @@ func TestSWIM_HandleMbrStatsMsg_SuspectMsg(t *testing.T) {
 	}
 
 	// setup member_map
-	mm := NewMemberMap(&SuspicionConfig{})
+	mm := NewMemberMap(&SuspicionConfig{
+		K:        3,
+		MinParam: 5,
+		MaxParam: 1,
+	})
 	mm.members[MemberID{ID: "1"}] = &Member{
 		ID:     MemberID{ID: "1"},
 		Status: Alive,
@@ -317,6 +321,11 @@ func TestSWIM_HandleMbrStatsMsg_SuspectMsg(t *testing.T) {
 		},
 		memberMap:        mm,
 		mbrStatsMsgStore: mbrStatsMsgStore,
+		awareness:        NewAwareness(5),
+		config: &Config{
+			T:          4000,
+			AckTimeOut: 3000,
+		},
 	}
 
 	// given
@@ -329,13 +338,13 @@ func TestSWIM_HandleMbrStatsMsg_SuspectMsg(t *testing.T) {
 
 	// when
 	swim.handleMbrStatsMsg(stats)
-
+	//&{{1} <nil> 0 2 2019-04-23 16:41:59.464422 +0900 KST m=+0.002258696 2 0xc0000c04b0}
+	//&{{1} <nil> 0 2 2019-04-23 16:42:20.00995 +0900 KST m=+0.004020539 2 0xc0000c24b0}
 	// then
 	assert.Equal(t, pushedMbrStatsMsg.Type, stats.Type)
 	assert.Equal(t, pushedMbrStatsMsg.Id, stats.Id)
 	assert.Equal(t, pushedMbrStatsMsg.Incarnation, stats.Incarnation)
 	assert.Equal(t, pushedMbrStatsMsg.Address, stats.Address)
-
 	assert.Equal(t, mm.members[MemberID{ID: "1"}].Status, Suspected)
 	assert.Equal(t, mm.members[MemberID{ID: "1"}].Incarnation, stats.Incarnation)
 }
@@ -817,6 +826,11 @@ func TestHandleSuspectMbrStats_Success(t *testing.T) {
 			ID: MemberID{ID: "123"},
 		},
 		memberMap: mm,
+		awareness: NewAwareness(5),
+		config: &Config{
+			T: 5000,
+			K: 3,
+		},
 	}
 
 	// when
@@ -1193,7 +1207,7 @@ func TestSWIM_ping_When_Response_Failed(t *testing.T) {
 	assert.Error(t, err, ErrSendTimeout)
 }
 
-// test when one of k-members response with other than ACK or NACK
+// test when one of K-members response with other than ACK or NACK
 func TestSWIM_indirectProbe_When_Successfully_Probed(t *testing.T) {
 	mIAddr := "127.0.0.1:11184"
 	mJAddr := "127.0.0.1:11183"
@@ -1592,8 +1606,8 @@ func TestSWIM_probe_When_Member_Is_Dead(t *testing.T) {
 		ID:     MemberID{ID: "111"},
 		Status: Dead,
 	}
-	T := time.NewTimer(time.Second)
-	swim.probe(member, T)
+
+	swim.probe(member, time.Second)
 }
 
 func TestSWIM_probe_When_Target_Respond_To_Ping(t *testing.T) {
@@ -1631,9 +1645,9 @@ func TestSWIM_probe_When_Target_Respond_To_Ping(t *testing.T) {
 	}
 
 	mm := NewMemberMap(&SuspicionConfig{
-		k:   2,
-		min: time.Hour,
-		max: time.Hour * 8,
+		K:        2,
+		MinParam: 5,
+		MaxParam: 1,
 	})
 
 	mI := &Member{
@@ -1671,8 +1685,7 @@ func TestSWIM_probe_When_Target_Respond_To_Ping(t *testing.T) {
 	go mIMessageEndpoint.Listen()
 	defer mIMessageEndpoint.Shutdown()
 
-	T := time.NewTimer(5 * time.Second)
-	swim.probe(mJMember, T)
+	swim.probe(mJMember, 5*time.Second)
 
 	assert.Equal(t, swim.awareness.score, 1)
 }
@@ -1743,9 +1756,9 @@ func TestSWIM_probe_When_Target_Respond_To_Indirect_Ping(t *testing.T) {
 	m2Member := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), Port: 13164, Status: Alive}
 
 	mm := NewMemberMap(&SuspicionConfig{
-		k:   2,
-		min: time.Hour,
-		max: time.Hour * 8,
+		K:        2,
+		MinParam: 5,
+		MaxParam: 1,
 	})
 	mm.members[m1Member.ID] = m1Member
 	mm.members[m2Member.ID] = m2Member
@@ -1833,9 +1846,8 @@ func TestSWIM_probe_When_Target_Respond_To_Indirect_Ping(t *testing.T) {
 		mk2MessageEndpoint.Shutdown()
 	}()
 
-	T := time.NewTimer(5 * time.Second)
 	mJMember := Member{ID: MemberID{ID: "mj"}, Addr: net.ParseIP("127.0.0.1"), Port: 13161, Status: Alive}
-	swim.probe(mJMember, T)
+	swim.probe(mJMember, 5*time.Second)
 
 	assert.Equal(t, swim.awareness.score, 1)
 }
@@ -1988,9 +2000,8 @@ func TestSWIM_probe_When_Target_Not_Respond_To_Indirect_Ping(t *testing.T) {
 		mk2MessageEndpoint.Shutdown()
 	}()
 
-	T := time.NewTimer(5 * time.Second)
 	mJMember := Member{ID: MemberID{ID: "mj"}, Addr: net.ParseIP("127.0.0.1"), Port: 11161, Status: Alive}
-	swim.probe(mJMember, T)
+	swim.probe(mJMember, 5*time.Second)
 
 	assert.Equal(t, swim.awareness.score, 3)
 }

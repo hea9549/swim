@@ -34,11 +34,10 @@ import (
 // Suspicion manages the suspect timer and helps to accelerate the timeout
 // as member self got more independent confirmations that a target member is suspect.
 type Suspicion struct {
-
 	// n is the number of independent confirmations we've seen.
 	n int32
 
-	// k is the maximum number of independent confirmation's we'd like to see
+	// K is the maximum number of independent confirmation's we'd like to see
 	// this value is for making timer to drive @min value
 	k int32
 
@@ -68,16 +67,23 @@ type Suspicion struct {
 // NewSuspicion returns a timer started with the max value, and according to
 // Lifeguard L2 (Dynamic Suspicion timeout) each unique confirmation will drive the timer
 // to min value
-func NewSuspicion(confirmer MemberID, k int, min time.Duration, max time.Duration, timeoutHandler func()) (*Suspicion, error) {
+func NewSuspicion(confirmer MemberID, config *SuspicionConfig, curNodeNum int, curProbeInterval time.Duration, timeoutHandler func()) (*Suspicion, error) {
 
 	if timeoutHandler == nil {
 		return nil, errors.New("timeout handler can not be nil")
 	}
 
+	minDuration := time.Duration(float64(config.MinParam) * math.Log10(float64(curNodeNum))) * curProbeInterval
+	maxDuration := time.Duration(config.MaxParam)*minDuration
+
+	if minDuration == 0{
+		minDuration = curProbeInterval
+		maxDuration = time.Duration(config.MaxParam)*minDuration
+	}
 	s := &Suspicion{
-		k:             int32(k),
-		min:           min,
-		max:           max,
+		k:             int32(config.K),
+		min:           minDuration,
+		max:           maxDuration,
 		confirmations: make(map[MemberID]struct{}),
 	}
 
@@ -90,9 +96,9 @@ func NewSuspicion(confirmer MemberID, k int, min time.Duration, max time.Duratio
 
 	// If there aren't any confirmations to be made then take the min
 	// time from the start.
-	timeout := max
-	if k < 1 {
-		timeout = min
+	timeout := s.max
+	if config.K < 1 {
+		timeout = s.min
 	}
 	s.timer = time.AfterFunc(timeout, s.timeoutHandler)
 

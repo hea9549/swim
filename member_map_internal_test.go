@@ -242,7 +242,7 @@ func TestMemberMap_SelectKRandomMember(t *testing.T) {
 		assert.True(t, checkExist(rMembers, members[i]))
 	}
 
-	// case 2: when k is larger then length of members
+	// case 2: when K is larger then length of members
 	assert.Equal(t, len(m.SelectKRandomMemberID(5)), 3)
 }
 
@@ -256,7 +256,7 @@ func TestMemberMap_Suspect_MessageId_Empty(t *testing.T) {
 		},
 	}
 
-	res, err := m.Suspect(msg)
+	res, err := m.Suspect(msg,1000*time.Millisecond)
 
 	assert.Equal(t, res, false)
 	assert.Equal(t, err, ErrEmptyMemberID)
@@ -272,7 +272,7 @@ func TestMemberMap_Suspect_When_Member_Not_Exist(t *testing.T) {
 		},
 	}
 
-	res, err := m.Suspect(msg)
+	res, err := m.Suspect(msg,1000*time.Millisecond)
 
 	assert.Equal(t, res, false)
 	assert.NoError(t, err)
@@ -296,7 +296,7 @@ func TestMemberMap_Suspect_With_Smaller_Incarnation(t *testing.T) {
 		},
 	}
 
-	res, err := m.Suspect(msg)
+	res, err := m.Suspect(msg,1000*time.Millisecond)
 
 	assert.Equal(t, res, false)
 	assert.Equal(t, err, nil)
@@ -328,7 +328,7 @@ func TestMemberMap_Suspect_When_Member_Alive(t *testing.T) {
 		ConfirmerID: "IAMCONFIRMER",
 	}
 
-	res, err := m.Suspect(msg1)
+	res, err := m.Suspect(msg1,1000*time.Millisecond)
 
 	assert.Equal(t, res, true)
 	assert.Equal(t, err, nil)
@@ -348,7 +348,7 @@ func TestMemberMap_Suspect_When_Member_Alive(t *testing.T) {
 		ConfirmerID: "IAMCONFIRMER22",
 	}
 
-	res, err = m.Suspect(msg2)
+	res, err = m.Suspect(msg2,1000*time.Millisecond)
 
 	assert.Equal(t, res, true)
 	assert.Equal(t, err, nil)
@@ -364,7 +364,12 @@ func TestMemberMap_Suspect_When_Member_Alive(t *testing.T) {
 // only Confirm
 func TestMemberMap_Suspect_When_Member_Suspect(t *testing.T) {
 	// setup member map
-	suspicion, _ := NewSuspicion(MemberID{ID: "ALREADY-HAVE-CONFIRMER"}, 10, time.Second, time.Hour, func() {})
+	suspicionConfig := SuspicionConfig{
+		K:        3,
+		MinParam: 5,
+		MaxParam: 1,
+	}
+	suspicion, _ := NewSuspicion(MemberID{ID: "ALREADY-HAVE-CONFIRMER"}, &suspicionConfig,1,time.Second, func() {})
 	member1 := &Member{
 		ID:          MemberID{ID: "1"},
 		Incarnation: 3,
@@ -384,7 +389,7 @@ func TestMemberMap_Suspect_When_Member_Suspect(t *testing.T) {
 		ConfirmerID: "IAMCONFIRMER",
 	}
 
-	res, err := m.Suspect(msg1)
+	res, err := m.Suspect(msg1,time.Second)
 
 	assert.Equal(t, res, true)
 	assert.Equal(t, err, nil)
@@ -410,9 +415,9 @@ func TestMemberMap_Suspect_When_Member_Suspect_Without_Suspicion(t *testing.T) {
 	}
 
 	m := NewMemberMap(&SuspicionConfig{
-		k:   1000,
-		min: time.Hour,
-		max: time.Hour * 8,
+		K:        1000,
+		MinParam: 5,
+		MaxParam: 1,
 	})
 	m.members[MemberID{ID: "1"}] = member1
 
@@ -424,7 +429,7 @@ func TestMemberMap_Suspect_When_Member_Suspect_Without_Suspicion(t *testing.T) {
 		},
 		ConfirmerID: "IAMCONFIRMER",
 	}
-	res, err := m.Suspect(msg1)
+	res, err := m.Suspect(msg1,time.Second)
 	assert.Equal(t, res, true)
 	assert.Equal(t, err, nil)
 	assert.Equal(t, member1.Incarnation, msg1.Incarnation)
@@ -452,34 +457,10 @@ func TestMemberMap_Suspect_When_Dead(t *testing.T) {
 		ConfirmerID: "IAMCONFIRMER",
 	}
 
-	res, err := m.Suspect(msg1)
+	res, err := m.Suspect(msg1,time.Second)
 
 	assert.Equal(t, res, false)
 	assert.Equal(t, err, nil)
-}
-
-func TestMemberMap_Suspect_When_Unknown(t *testing.T) {
-	member1 := &Member{
-		ID:          MemberID{ID: "1"},
-		Incarnation: 3,
-		Status:      Unknown,
-	}
-
-	m := NewMemberMap(&SuspicionConfig{})
-	m.members[MemberID{ID: "1"}] = member1
-
-	msg1 := SuspectMessage{
-		MemberMessage: MemberMessage{
-			ID:          "1",
-			Incarnation: uint32(5),
-		},
-		ConfirmerID: "IAMCONFIRMER",
-	}
-
-	res, err := m.Suspect(msg1)
-
-	assert.Equal(t, res, false)
-	assert.Equal(t, err, ErrMemberUnknownState)
 }
 
 func checkExist(members []Member, m Member) bool {

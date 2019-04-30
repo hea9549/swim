@@ -43,7 +43,8 @@ message PiggyBack{
 
 // Membership has a list of Member status messages
 message Membership {
-    repeated MbrStatsMsg mbrStatsMsgs = 1;
+    string senderId = 1;
+    repeated MbrStatsMsg mbrStatsMsgs = 2;
 }
 
 // Member status message

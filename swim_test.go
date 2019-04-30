@@ -15,3 +15,53 @@
  */
 
 package swim
+//
+//import (
+//	"testing"
+//	"strconv"
+//	"net"
+//	"github.com/stretchr/testify/assert"
+//)
+//
+//func TestSWIM_Join(t *testing.T) {
+//	port, err := GetAvailablePort()
+//
+//	assert.NoError(t, err)
+//
+//	s1 := New(&Config{
+//		K:             2,
+//		T:             4000,
+//		AckTimeOut:    1000,
+//		MaxlocalCount: 1,
+//		MaxNsaCounter: 8,
+//		BindAddress:   "127.0.0.1",
+//		BindPort:      port,
+//	},
+//		&SuspicionConfig{
+//			K:   3,
+//			min: ,
+//			max: 0,
+//		},
+//		MessageEndpointConfig{
+//			CallbackCollectInterval: 1000,
+//		},
+//		&Member{},
+//	)
+//
+//}
+//
+//func GetAvailablePort() (int, error) {
+//	portNumber := 5000
+//	for {
+//		strPortNumber := strconv.Itoa(portNumber)
+//		lis, err := net.Listen("tcp", "127.0.0.1:"+strPortNumber)
+//
+//		if err == nil {
+//			lis.Close()
+//			return portNumber, nil
+//		}
+//
+//		portNumber++
+//
+//	}
+//}

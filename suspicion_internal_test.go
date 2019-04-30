@@ -58,12 +58,17 @@ func TestSuspicion_calcRemainingSuspicionTime(t *testing.T) {
 func TestNewSuspicion(t *testing.T) {
 
 	// check nil timeout handler
-	_, err := NewSuspicion(MemberID{ID: "me"}, 3, 2*time.Second, 30*time.Second, nil)
+	suspicionConfig := SuspicionConfig{
+		K:        3,
+		MinParam: 5,
+		MaxParam: 1,
+	}
+	_, err := NewSuspicion(MemberID{ID: "me"}, &suspicionConfig,1,time.Second, nil)
 	assert.Error(t, err)
 
 	timeoutHandler := func() {}
 
-	_, err = NewSuspicion(MemberID{ID: "me"}, 3, 2*time.Second, 30*time.Second, timeoutHandler)
+	_, err = NewSuspicion(MemberID{ID: "me"}, &suspicionConfig,1,time.Second, timeoutHandler)
 	assert.NoError(t, err)
 }
 
@@ -72,6 +77,11 @@ func TestSuspicion_Received_One_Confirm(t *testing.T) {
 	// given
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+	suspicionConfig := SuspicionConfig{
+		K:        3,
+		MinParam: 5,
+		MaxParam: 1,
+	}
 
 	var start time.Time
 
@@ -85,7 +95,7 @@ func TestSuspicion_Received_One_Confirm(t *testing.T) {
 
 	start = time.Now()
 
-	_, err := NewSuspicion(MemberID{ID: "me"}, 3, 2*time.Second, 10*time.Second, timeoutHandler)
+	_, err := NewSuspicion(MemberID{ID: "me"}, &suspicionConfig,1,time.Second, timeoutHandler)
 	assert.NoError(t, err)
 
 	//
@@ -97,6 +107,11 @@ func TestSuspicion_Received_Two_Confirm(t *testing.T) {
 	// given
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+	suspicionConfig := SuspicionConfig{
+		K:        3,
+		MinParam: 5,
+		MaxParam: 1,
+	}
 
 	var start time.Time
 
@@ -110,7 +125,7 @@ func TestSuspicion_Received_Two_Confirm(t *testing.T) {
 
 	start = time.Now()
 
-	s, err := NewSuspicion(MemberID{ID: "me"}, 3, 2*time.Second, 10*time.Second, timeoutHandler)
+	s, err := NewSuspicion(MemberID{ID: "me"}, &suspicionConfig,1,time.Second, timeoutHandler)
 	assert.NoError(t, err)
 
 	// when received two confirm
@@ -125,6 +140,11 @@ func TestSuspicion_Received_Three_Confirm(t *testing.T) {
 	// given
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+	suspicionConfig := SuspicionConfig{
+		K:        3,
+		MinParam: 5,
+		MaxParam: 1,
+	}
 
 	var start time.Time
 
@@ -138,7 +158,7 @@ func TestSuspicion_Received_Three_Confirm(t *testing.T) {
 
 	start = time.Now()
 
-	s, err := NewSuspicion(MemberID{ID: "me"}, 3, 2*time.Second, 10*time.Second, timeoutHandler)
+	s, err := NewSuspicion(MemberID{ID: "me"}, &suspicionConfig,1,time.Second, timeoutHandler)
 	assert.NoError(t, err)
 
 	// when received three confirm

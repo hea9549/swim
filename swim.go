@@ -54,7 +54,6 @@ func (r IndProbeResponse) Ok() bool {
 }
 
 type Config struct {
-
 	// The maximum number of times the same piggyback data can be queried
 	MaxlocalCount int
 
@@ -99,6 +98,12 @@ type SWIM struct {
 
 	// MbrStatsMsgStore which store messages about recent state changes of member.
 	mbrStatsMsgStore MbrStatsMsgStore
+
+	// calculated current probe interval duration by awareness
+	curProbeInterval time.Duration
+
+	// calculated current probe timeout duration by awareness
+	curProbeTimeout time.Duration
 }
 
 func New(config *Config, suspicionConfig *SuspicionConfig, messageEndpointConfig MessageEndpointConfig, member *Member) *SWIM {
@@ -107,11 +112,12 @@ func New(config *Config, suspicionConfig *SuspicionConfig, messageEndpointConfig
 	}
 
 	swim := SWIM{
-		config:    config,
-		awareness: NewAwareness(config.MaxNsaCounter),
-		memberMap: NewMemberMap(suspicionConfig),
-		member:    member,
-		quitFD:    make(chan struct{}),
+		config:           config,
+		awareness:        NewAwareness(config.MaxNsaCounter),
+		memberMap:        NewMemberMap(suspicionConfig),
+		member:           member,
+		quitFD:           make(chan struct{}),
+		mbrStatsMsgStore: NewPriorityMbrStatsMsgStore(config.MaxlocalCount),
 	}
 
 	messageEndpoint := messageEndpointFactory(config, messageEndpointConfig, &swim)
@@ -150,10 +156,18 @@ func (s *SWIM) Start() {
 func (s *SWIM) Join(peerAddresses []string) error {
 
 	for _, address := range peerAddresses {
-		s.exchangeMembership(address)
+		err := s.exchangeMembership(address)
+		if err != nil {
+			iLogger.Error(nil, "error while join"+err.Error())
+		}
+		iLogger.Info(nil, "add new member : "+address)
 	}
 
 	return nil
+}
+
+func (s *SWIM) GetMemberMap() MemberMap {
+	return *s.memberMap
 }
 
 func (s *SWIM) exchangeMembership(address string) error {
@@ -175,9 +189,26 @@ func (s *SWIM) exchangeMembership(address string) error {
 	}
 
 	// Handle received membership
-	switch msg := msg.Payload.(type) {
+	switch msgPayload := msg.Payload.(type) {
 	case *pb.Message_Membership:
-		for _, m := range msg.Membership.MbrStatsMsgs {
+
+		// if new one
+		if !s.memberMap.IsMember(MemberID{ID: msgPayload.Membership.SenderId,}) {
+			stats := &pb.MbrStatsMsg{
+				Type:        pb.MbrStatsMsg_Alive,
+				Id:          msgPayload.Membership.SenderId,
+				Incarnation: uint32(0),
+				Address:     msg.Address,
+			}
+			_, err := s.handleAliveMbrStatsMsg(stats)
+			if err != nil {
+				iLogger.Error(nil, "error while exchange membership"+err.Error())
+				return err
+			}
+			s.handleMbrStatsMsg(stats)
+		}
+
+		for _, m := range msgPayload.Membership.MbrStatsMsgs {
 			s.handleMbrStatsMsg(m)
 		}
 	default:
@@ -190,6 +221,7 @@ func (s *SWIM) exchangeMembership(address string) error {
 func (s *SWIM) createMembership() *pb.Membership {
 
 	membership := &pb.Membership{
+		SenderId:     s.member.ID.ID,
 		MbrStatsMsgs: make([]*pb.MbrStatsMsg, 0),
 	}
 	for _, m := range s.memberMap.GetMembers() {
@@ -209,6 +241,9 @@ func (s *SWIM) handleMbrStatsMsg(mbrStatsMsg *pb.MbrStatsMsg) {
 	hasChanged := false
 
 	if s.member.ID.ID == mbrStatsMsg.Id {
+		if mbrStatsMsg.Type == pb.MbrStatsMsg_Alive {
+			return
+		}
 		s.refute(mbrStatsMsg)
 		s.mbrStatsMsgStore.Push(*mbrStatsMsg)
 		return
@@ -259,7 +294,9 @@ func (s *SWIM) handleSuspectMbrStatsMsg(stats *pb.MbrStatsMsg) (bool, error) {
 		return false, err
 	}
 
-	return s.memberMap.Suspect(msg)
+	curProbeInterval := time.Duration(s.awareness.score+1) * time.Millisecond * time.Duration(s.config.T)
+
+	return s.memberMap.Suspect(msg, curProbeInterval)
 }
 
 func (s *SWIM) convMbrStatsToAliveMsg(stats *pb.MbrStatsMsg) (AliveMessage, error) {
@@ -313,6 +350,9 @@ func (s *SWIM) refute(mbrStatsMsg *pb.MbrStatsMsg) {
 	// Update piggyBack's incarnation to store to pbkStore
 	mbrStatsMsg.Incarnation = inc
 
+	// Change msg state to alive
+	mbrStatsMsg.Type = pb.MbrStatsMsg_Alive
+
 	// Increase awareness count(Decrease our health) because we are being asked to refute a problem.
 	s.awareness.ApplyDelta(1)
 }
@@ -341,10 +381,10 @@ func (s *SWIM) toDie() bool {
 // 2. SWIM waits for ack of the member(j) during the ack-timeout (time less than T).
 //    End failure Detector if ack message arrives on ack-timeout.
 //
-// 3. SWIM selects k number of members from the memberMap and sends indirect-ping(request k members to ping the member(j)).
+// 3. SWIM selects K number of members from the memberMap and sends indirect-ping(request K members to ping the member(j)).
 //    The nodes (that receive the indirect-ping) ping to the member(j) and ack when they receive ack from the member(j).
 //
-// 4. At the end of T, SWIM checks to see if ack was received from k members, and if there is no message,
+// 4. At the end of T, SWIM checks to see if ack was received from K members, and if there is no message,
 //    The member(j) is judged to be failed, so check the member(j) as suspected or delete the member(j) from memberMap.
 //
 // ** When performing ping, ack, and indirect-ping in the above procedure, piggybackdata is sent together. **
@@ -358,23 +398,26 @@ func (s *SWIM) toDie() bool {
 //
 func (s *SWIM) startFailureDetector() {
 	go func() {
-		interval := time.Millisecond * time.Duration(s.config.T)
-		T := time.NewTimer(interval)
+		baseInterval := time.Millisecond * time.Duration(s.config.T)
 
 		for !s.toDie() {
 			members := s.memberMap.GetMembers()
-			if len(members) == 0 {
-				<-T.C
-				T.Reset(interval)
+			currentInterval := time.Duration(s.awareness.score+1) * baseInterval
+			if len(members) < 1 {
+				time.Sleep(currentInterval)
 				continue
 			}
 
 			for _, m := range members {
+				if m.Address() == s.member.Address() {
+					continue
+				}
+				currentInterval := time.Duration(s.awareness.score+1) * baseInterval
 				iLogger.Info(nil, "[swim] start probing ...")
-				s.probe(m, T)
+				s.probe(m, currentInterval)
 
 				iLogger.Info(nil, "[swim] done probing !")
-				T.Reset(interval)
+
 			}
 
 			// Reset memberMap.
@@ -390,13 +433,13 @@ func (s *SWIM) startFailureDetector() {
 // 1. Send ping to the member(j) during the ack-timeout (time less than T).
 //    Return if ack message arrives on ack-timeout.
 //
-// 2. selects k number of members from the memberMap and sends indirect-ping(request k members to ping the member(j)).
+// 2. selects K number of members from the memberMap and sends indirect-ping(request K members to ping the member(j)).
 //    The nodes (that receive the indirect-ping) ping to the member(j) and ack when they receive ack from the member(j).
 //
-// 3. At the end of T, SWIM checks to see if ack was received from k members, and if there is no message,
+// 3. At the end of T, SWIM checks to see if ack was received from K members, and if there is no message,
 //    The member(j) is judged to be failed, so check the member(j) as suspected or delete the member(j) from memberMap.
 //
-func (s *SWIM) probe(member Member, timer *time.Timer) {
+func (s *SWIM) probe(member Member, curInterval time.Duration) {
 
 	if member.Status == Dead {
 		return
@@ -412,6 +455,9 @@ func (s *SWIM) probe(member Member, timer *time.Timer) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	ctx, cancel := context.WithCancel(context.Background())
+
+	timer := time.NewTimer(curInterval)
+	defer timer.Stop()
 
 	go func() {
 		task := func() (interface{}, error) {
@@ -443,18 +489,18 @@ func (s *SWIM) probe(member Member, timer *time.Timer) {
 		iLogger.Infof(nil, "[SWIM] probe member [%s] timed out, start suspect", member.ID)
 		// when probing time is out, then cancel the probing procedure
 		cancel()
+		fmt.Println(s.member.ID.ID+": start wait group in probe")
 		wg.Wait()
-
+		fmt.Println(s.member.ID.ID+": finish wait group in probe")
 		s.awareness.ApplyDelta(1)
-		s.suspect(&member)
+		s.suspect(&member, curInterval)
 
 	// if probe ended with error then suspect member and increase Awareness
 	// otherwise just decrease Awareness score
 	case resp := <-end:
 		if !resp.Ok() {
-			fmt.Println("not ok")
 			s.awareness.ApplyDelta(1)
-			s.suspect(&member)
+			s.suspect(&member, curInterval)
 			return
 		}
 
@@ -462,27 +508,37 @@ func (s *SWIM) probe(member Member, timer *time.Timer) {
 	}
 }
 
-// indirectProbe select k-random member from MemberMap, sends
+// indirectProbe select K-random member from MemberMap, sends
 // indirect-ping to them. if one of them sends back Ack message
 // then indirectProbe success, otherwise failed.
-// if one of k-member successfully received ACK message, then cancel
-// k-1 member's probe
+// if one of K-member successfully received ACK message, then cancel
+// K-1 member's probe
 func (s *SWIM) indirectProbe(target *Member) error {
+	kMembers := s.memberMap.SelectKRandomMemberID(s.config.K, &target.ID)
+
+	indirectProbeNum := s.config.K
+	if len(kMembers) < s.config.K {
+		indirectProbeNum = len(kMembers)
+	}
+
+	if indirectProbeNum == 0 {
+		return errors.New("empty indirect probe member")
+	}
+
 	wg := &sync.WaitGroup{}
-	wg.Add(s.config.K)
+	wg.Add(indirectProbeNum)
 
 	// with cancel we can send the signal to goroutines which share
 	// this @ctx context
 	ctx, cancel := context.WithCancel(context.Background())
 
-	done := make(chan IndProbeResponse, s.config.K)
+	done := make(chan IndProbeResponse, indirectProbeNum)
 
 	defer func() {
 		cancel()
 		close(done)
 	}()
 
-	kMembers := s.memberMap.SelectKRandomMemberID(s.config.K)
 	for _, m := range kMembers {
 		go func(mediator Member) {
 			defer wg.Done()
@@ -515,8 +571,8 @@ func (s *SWIM) indirectProbe(target *Member) error {
 		}(m)
 	}
 
-	// wait until k-random member sends back response, if response message
-	// is Ack message, then indirectProbe success because one of k-member
+	// wait until K-random member sends back response, if response message
+	// is Ack message, then indirectProbe success because one of K-member
 	// success UDP communication, if Nack message or Invalid message, increase
 	// @unexpectedRespCounter then wait other member's response
 
@@ -535,7 +591,9 @@ func (s *SWIM) indirectProbe(target *Member) error {
 		}
 
 		cancel()
+		fmt.Println(s.member.ID.ID+": start wait group in IND probe")
 		wg.Wait()
+		fmt.Println(s.member.ID.ID+": finish wait group in IND probe")
 		return nil
 	}
 }
@@ -543,7 +601,7 @@ func (s *SWIM) indirectProbe(target *Member) error {
 // ping ping to member with piggyback message after sending ping message
 // the result can be:
 // 1. timeout
-//    in this case, push signal to start indirect-ping request to k random nodes
+//    in this case, push signal to start indirect-ping request to K random nodes
 // 2. successfully probed
 //    in the case of successfully probe target node, update member state with
 //    piggyback message sent from target member.
@@ -572,7 +630,7 @@ func (s *SWIM) ping(target *Member) error {
 // indirectPing sends indirect-ping to @member targeting @target member
 // ** only when @member sends back to local node, push Message to channel
 // otherwise just return **
-// @ctx is for sending cancel signal from outside, when one of k-member successfully
+// @ctx is for sending cancel signal from outside, when one of K-member successfully
 // received ACK message or when in the exceptional situation
 func (s *SWIM) indirectPing(mediator, target Member) (pb.Message, error) {
 	stats, err := s.mbrStatsMsgStore.Get()
@@ -598,10 +656,10 @@ func (s *SWIM) indirectPing(mediator, target Member) (pb.Message, error) {
 	return res, nil
 }
 
-func (s *SWIM) suspect(member *Member) {
+func (s *SWIM) suspect(member *Member, curProveInterval time.Duration) {
 	msg := createSuspectMessage(member, s.member.ID.ID)
 
-	result, err := s.memberMap.Suspect(msg)
+	result, err := s.memberMap.Suspect(msg, curProveInterval)
 	if err != nil {
 		iLogger.Error(nil, err.Error())
 	}
@@ -624,8 +682,9 @@ type MessageHandler interface {
 // 2. Process Ping, Ack, Indirect-ping messages.
 //
 func (s *SWIM) handle(msg pb.Message) {
-
-	s.handlePbk(msg.PiggyBack)
+	if msg.PiggyBack != nil {
+		s.handlePbk(msg.PiggyBack)
+	}
 
 	switch p := msg.Payload.(type) {
 	case *pb.Message_Ping:
@@ -635,7 +694,7 @@ func (s *SWIM) handle(msg pb.Message) {
 	case *pb.Message_IndirectPing:
 		s.handleIndirectPing(msg)
 	case *pb.Message_Membership:
-		s.handleMembership(p.Membership, msg.Address)
+		s.handleMembership(p.Membership, msg)
 	default:
 
 	}
@@ -694,10 +753,10 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 	// if successfully received ack message from target, then send back ack message
 	// to source member
 	if _, err := s.messageEndpoint.SyncSend(targetAddr, ping); err != nil {
-		nack := createNackMessage(id, srcAddr, &mbrStatsMsg)
-		if err := s.messageEndpoint.Send(srcAddr, nack); err != nil {
-			iLogger.Error(nil, err.Error())
-		}
+		//nack := createNackMessage(id, srcAddr, &mbrStatsMsg)
+		//if err := s.messageEndpoint.Send(srcAddr, nack); err != nil {
+		//			iLogger.Error(nil, err.Error())
+		//}
 		return
 	}
 
@@ -709,28 +768,47 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 
 // handleMembership receives Membership message.
 // create membership message with membermap and reply to the message with it.
-func (s *SWIM) handleMembership(membership *pb.Membership, address string) error {
+func (s *SWIM) handleMembership(membership *pb.Membership, msg pb.Message) {
+	payload := msg.Payload.(*pb.Message_Membership)
+
 	// Create membership message
 	m := s.createMembership()
 
 	// Reply
-	err := s.messageEndpoint.Send(address, pb.Message{
+	err := s.messageEndpoint.Send(msg.Address, pb.Message{
 		Address: s.member.Address(),
-		Id:      xid.New().String(),
+		Id:      msg.Id,
 		Payload: &pb.Message_Membership{
 			Membership: m,
 		},
 	})
 
 	if err != nil {
-		return err
+		iLogger.Error(nil, err.Error())
+		return
 	}
 
 	for _, m := range membership.MbrStatsMsgs {
 		s.handleMbrStatsMsg(m)
 	}
 
-	return nil
+	// add member if sender is not in membership
+	if !s.memberMap.IsMember(MemberID{ID: payload.Membership.SenderId,}) {
+		stats := &pb.MbrStatsMsg{
+			Type:        pb.MbrStatsMsg_Alive,
+			Id:          payload.Membership.SenderId,
+			Incarnation: uint32(0),
+			Address:     msg.Address,
+		}
+		_, err := s.handleAliveMbrStatsMsg(stats)
+		if err != nil {
+			iLogger.Error(nil, "error while handle membership"+err.Error())
+		} else {
+			s.handleMbrStatsMsg(stats)
+		}
+
+	}
+
 }
 
 func createPingMessage(id, src string, mbrStatsMsg *pb.MbrStatsMsg) pb.Message {

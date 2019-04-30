@@ -28,8 +28,13 @@ func TestSuspicion_Confirm(t *testing.T) {
 
 	// given
 	timeoutHandler := func() {}
+	suspicionConfig := swim.SuspicionConfig{
+		K:        3,
+		MinParam: 5,
+		MaxParam: 1,
+	}
 
-	s, err := swim.NewSuspicion(swim.MemberID{ID: "me"}, 3, 2*time.Second, 5*time.Second, timeoutHandler)
+	s, err := swim.NewSuspicion(swim.MemberID{ID: "me"}, &suspicionConfig,1,time.Second, timeoutHandler)
 	assert.NoError(t, err)
 
 	f := s.Confirm(swim.MemberID{ID: "test"})

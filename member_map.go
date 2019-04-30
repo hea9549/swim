@@ -36,11 +36,8 @@ var ErrMemberUnknownState = errors.New("error member is in unknown state")
 type Status int
 
 const (
-	// Unknown status of a member
-	Unknown Status = iota
-
 	// Alive status
-	Alive
+	Alive Status = iota
 
 	// Suspicious status of whether a member is dead or not
 	Suspected
@@ -53,16 +50,30 @@ func (s Status) toInt() int32 {
 	return int32(s)
 }
 
+func (s Status) String() string {
+	switch s {
+	case Alive:
+		return "Alive"
+	case Suspected:
+		return "Suspected"
+	case Dead:
+		return "Dead"
+	}
+	return "unknown"
+}
+
 type SuspicionConfig struct {
-	// k is the maximum number of independent confirmation's we'd like to see
+	// K is the maximum number of independent confirmation's we'd like to see
 	// this value is for making timer to drive @min value
-	k int
+	K int
 
-	// min is the minimum timer value
-	min time.Duration
+	// MinParam is a parameter to calculate minimum timer value.
+	// it is same to alpha value in Lifeguard paper
+	MinParam int
 
-	// max is the maximum timer value
-	max time.Duration
+	// MaxParam is a parameter to calculate maximum timer value.
+	// it is same to alpha value in Lifeguard paper
+	MaxParam int
 }
 
 type MemberID struct {
@@ -147,15 +158,30 @@ func NewMemberMap(config *SuspicionConfig) *MemberMap {
 	}
 }
 
-// Select K random member (length of returning member can be lower than k).
-func (m *MemberMap) SelectKRandomMemberID(k int) []Member {
+// check member
+func (m *MemberMap) IsMember(id MemberID) bool {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 
+	for _, m := range m.members {
+		if id == m.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// Select K random member (length of returning member can be lower than K).
+func (m *MemberMap) SelectKRandomMemberID(k int, exceptMemberId *MemberID) []Member {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
 	// Filter non-alive member
 	members := make([]Member, 0)
 	for _, member := range m.members {
+		if *exceptMemberId == member.ID {
+			continue
+		}
 		if member.Status == Alive {
 			members = append(members, *member)
 		}
@@ -195,7 +221,7 @@ func (m *MemberMap) GetMembers() []Member {
 
 // Suspect handle suspectMessage, if this function update member states
 // return true otherwise false
-func (m *MemberMap) Suspect(msg SuspectMessage) (bool, error) {
+func (m *MemberMap) Suspect(msg SuspectMessage, curProveInterval time.Duration) (bool, error) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	// if member id is empty, return empty memberID err
@@ -218,9 +244,9 @@ func (m *MemberMap) Suspect(msg SuspectMessage) (bool, error) {
 
 	switch member.Status {
 	case Alive:
-		return m.suspectWhenAlive(member, confirmer, incarnation)
+		return m.suspectWhenAlive(member, confirmer, incarnation, curProveInterval)
 	case Suspected:
-		return m.suspectWhenSuspect(member, confirmer, incarnation)
+		return m.suspectWhenSuspect(member, confirmer, incarnation, curProveInterval)
 	case Dead:
 		return m.suspectWhenDead()
 	}
@@ -232,10 +258,10 @@ func (m *MemberMap) suspectWhenDead() (bool, error) {
 	return false, nil
 }
 
-func (m *MemberMap) suspectWhenAlive(member *Member, confirmer string, incarnation uint32) (bool, error) {
+func (m *MemberMap) suspectWhenAlive(member *Member, confirmer string, incarnation uint32, curProveInterval time.Duration) (bool, error) {
 	config := m.suspicionConfig
 
-	suspicion, err := NewSuspicion(MemberID{confirmer}, config.k, config.min, config.max, getSuspicionCallback(m, member))
+	suspicion, err := NewSuspicion(MemberID{confirmer}, config, len(m.members), curProveInterval, getSuspicionCallback(m, member))
 	if err != nil {
 		return false, ErrCreatingSuspicion
 	}
@@ -247,11 +273,11 @@ func (m *MemberMap) suspectWhenAlive(member *Member, confirmer string, incarnati
 	return true, nil
 }
 
-func (m *MemberMap) suspectWhenSuspect(member *Member, confirmer string, incarnation uint32) (bool, error) {
+func (m *MemberMap) suspectWhenSuspect(member *Member, confirmer string, incarnation uint32, curProveInterval time.Duration) (bool, error) {
 	config := m.suspicionConfig
 
 	if member.Suspicion == nil {
-		suspicion, err := NewSuspicion(MemberID{confirmer}, config.k, config.min, config.max, getSuspicionCallback(m, member))
+		suspicion, err := NewSuspicion(MemberID{confirmer}, config, len(m.members), curProveInterval, getSuspicionCallback(m, member))
 		if err != nil {
 			return false, ErrCreatingSuspicion
 		}
