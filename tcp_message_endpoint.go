@@ -1,16 +1,16 @@
 package swim
 
 import (
-	"net"
-	"time"
-	"github.com/DE-labtory/swim/pb"
-	"sync"
-	"github.com/golang/protobuf/proto"
-	"strconv"
 	"errors"
-	"strings"
 	"github.com/DE-labtory/iLogger"
-	)
+	"github.com/DE-labtory/swim/pb"
+	"github.com/golang/protobuf/proto"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
 
 const (
 	fillBufChar = ":"
@@ -24,7 +24,8 @@ var ErrConnIsNotExist = errors.New("no connection in map")
 type TCPMessageEndpointConfig struct {
 	EncryptionEnabled bool
 	TCPTimeout        time.Duration
-	ServerAddress     string
+	IP                string
+	Port              int
 }
 
 type TCPMessageEndpoint struct {
@@ -53,7 +54,7 @@ func NewTCPMessageEndpoint(config TCPMessageEndpointConfig, messageHandler Messa
 }
 func (t *TCPMessageEndpoint) Listen() {
 
-	server, err := net.Listen("tcp", t.config.ServerAddress)
+	server, err := net.Listen("tcp", t.config.IP+":"+strconv.Itoa(t.config.Port))
 	if err != nil {
 		iLogger.Panic(nil, "[TCPMessageEndpoint] panic in initial listen")
 	}
@@ -77,9 +78,8 @@ func (t *TCPMessageEndpoint) Listen() {
 func (t *TCPMessageEndpoint) Send(addr string, msg pb.Message) error {
 	conn, l, err := t.getConnAndLock(addr)
 
-	if err == ErrConnIsNotExist{
-		t.makeConnAndLock(addr)
-		err = nil
+	if err == ErrConnIsNotExist {
+		conn, l, err = t.makeConnAndLock(addr)
 	}
 
 	if err != nil {
@@ -130,7 +130,7 @@ func (t *TCPMessageEndpoint) Send(addr string, msg pb.Message) error {
 func (t *TCPMessageEndpoint) Shutdown() {
 	t.isShutdown = true
 
-	for _, conn := range t.connMap{
+	for _, conn := range t.connMap {
 		conn.Close()
 	}
 }
@@ -138,7 +138,7 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 
 	for {
 		// todo check shutdown gracefully
-		if t.isShutdown{
+		if t.isShutdown {
 			return
 		}
 
@@ -163,12 +163,12 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 			return
 		}
 		var receivedBytes int64
-		receivedData := make([]byte,0)
+		receivedData := make([]byte, 0)
 		for {
 
 			if (dataSize - receivedBytes) < tcpBufferSize {
-				tempReceived := make([]byte, (receivedBytes+tcpBufferSize)-dataSize)
-				_,err := conn.Read(tempReceived)
+				tempReceived := make([]byte, dataSize-receivedBytes)
+				_, err := conn.Read(tempReceived)
 
 				if err != nil {
 					iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver read received")
@@ -180,8 +180,8 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 				receivedData = append(receivedData, tempReceived...)
 				break
 			}
-			tempReceived := make([]byte,tcpBufferSize)
-			_,err := conn.Read(tempReceived)
+			tempReceived := make([]byte, tcpBufferSize)
+			_, err := conn.Read(tempReceived)
 
 			if err != nil {
 				iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver read max received")
@@ -213,13 +213,20 @@ func (t *TCPMessageEndpoint) makeConnAndLock(addr string) (net.Conn, *sync.Mutex
 	if e == nil {
 		return c, l, e
 	}
+	dialer := &net.Dialer{
+		Timeout: t.config.TCPTimeout,
+		LocalAddr: &net.TCPAddr{
+			IP:   net.ParseIP(t.config.IP),
+			Port: t.config.Port,
+		},
 
-	c, err := net.DialTimeout("tcp", addr, t.config.TCPTimeout)
+	}
+	c, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	t.connMap[addr] = &c
+	t.connMap[addr] = c
 
 	lock := &sync.Mutex{}
 	t.sendLockMap[addr] = lock

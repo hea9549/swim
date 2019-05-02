@@ -1,12 +1,11 @@
 package main
 
 import (
-			"github.com/DE-labtory/swim"
-	"net"
-	"time"
 	"fmt"
 	"github.com/DE-labtory/iLogger"
-	"strconv"
+	"github.com/DE-labtory/swim"
+	"net"
+	"time"
 )
 
 func beforeTester() {
@@ -26,37 +25,37 @@ func beforeTester() {
 	go swim6.Start()
 	time.Sleep(300 * time.Millisecond)
 
-	err := swim1.Join([]string{"127.0.0.1:5005"})
+	err := swim1.Join([]string{"127.0.0.1:15005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim2.Join([]string{"127.0.0.1:5005"})
+	err = swim2.Join([]string{"127.0.0.1:15005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim3.Join([]string{"127.0.0.1:5005"})
+	err = swim3.Join([]string{"127.0.0.1:15005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim4.Join([]string{"127.0.0.1:5005"})
+	err = swim4.Join([]string{"127.0.0.1:15005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim5.Join([]string{"127.0.0.1:5005"})
+	err = swim5.Join([]string{"127.0.0.1:15005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim6.Join([]string{"127.0.0.1:5005"})
+	err = swim6.Join([]string{"127.0.0.1:15005"})
 	if err != nil {
 		print(err)
 		return
@@ -91,38 +90,39 @@ func beforeTester() {
 	}
 }
 func main() {
-	swimObjList := make([]*swim.SWIM,0)
-	for i := 0; i < 1000; i++ {
-		swimObj := SetupSwim("127.0.0.1", 30000+i, strconv.Itoa(i))
-		go swimObj.Start()
-		swimObjList = append(swimObjList, swimObj)
-	}
-	time.Sleep(3*time.Second)
-
-	for idx,sObj := range swimObjList{
-		if idx == 0{
-			continue
-		}
-		sObj.Join([]string{"127.0.0.1:30000"})
-	}
-
-	counter := 0
-	time.Sleep(3000 * time.Millisecond)
-
-	swimObjList[0].ShutDown()
-	for {
-		if counter == 100 {
-			break
-		}
-		s2mm := swimObjList[2].GetMemberMap()
-		infoStr := ""
-		for _, a := range s2mm.GetMembers() {
-			infoStr = infoStr + "IP : " + a.Address() + ",status :" + a.Status.String() + "||"
-		}
-		iLogger.Info(nil, infoStr)
-		time.Sleep(1000 * time.Millisecond)
-		counter++
-	}
+	beforeTester()
+	//swimObjList := make([]*swim.SWIM,0)
+	//for i := 0; i < 1000; i++ {
+	//	swimObj := SetupSwim("127.0.0.1", 30000+i, strconv.Itoa(i))
+	//	go swimObj.Start()
+	//	swimObjList = append(swimObjList, swimObj)
+	//}
+	//time.Sleep(3*time.Second)
+	//
+	//for idx,sObj := range swimObjList{
+	//	if idx == 0{
+	//		continue
+	//	}
+	//	sObj.Join([]string{"127.0.0.1:30000"})
+	//}
+	//
+	//counter := 0
+	//time.Sleep(3000 * time.Millisecond)
+	//
+	//swimObjList[0].ShutDown()
+	//for {
+	//	if counter == 100 {
+	//		break
+	//	}
+	//	s2mm := swimObjList[2].GetMemberMap()
+	//	infoStr := ""
+	//	for _, a := range s2mm.GetMembers() {
+	//		infoStr = infoStr + "IP : " + a.Address() + ",status :" + a.Status.String() + "||"
+	//	}
+	//	iLogger.Info(nil, infoStr)
+	//	time.Sleep(1000 * time.Millisecond)
+	//	counter++
+	//}
 }
 
 func SetupSwim(ip string, port int, id string) *swim.SWIM {
@@ -145,7 +145,14 @@ func SetupSwim(ip string, port int, id string) *swim.SWIM {
 		SendTimeout:             1000 * time.Millisecond,
 		CallbackCollectInterval: time.Minute,
 	}
-	swimObj := swim.New(&swimConfig, &suspicionConfig, messageEndpointConfig, &swim.Member{
+
+	tcpEndpointconfig := swim.TCPMessageEndpointConfig{
+		EncryptionEnabled: false,
+		TCPTimeout:        2 * time.Second,
+		IP:                ip,
+		Port:              port + 10000,
+	}
+	swimObj := swim.New(&swimConfig, &suspicionConfig, messageEndpointConfig, tcpEndpointconfig, &swim.Member{
 		ID:               swim.MemberID{ID: id},
 		Addr:             net.ParseIP(ip),
 		Port:             uint16(port),

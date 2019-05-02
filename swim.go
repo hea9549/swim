@@ -19,7 +19,8 @@ package swim
 import (
 	"context"
 	"errors"
-		"reflect"
+	"reflect"
+	"strconv"
 	"sync"
 	"time"
 
@@ -108,7 +109,8 @@ type SWIM struct {
 	curProbeTimeout time.Duration
 }
 
-func New(config *Config, suspicionConfig *SuspicionConfig, messageEndpointConfig MessageEndpointConfig, member *Member) *SWIM {
+func New(config *Config, suspicionConfig *SuspicionConfig, messageEndpointConfig MessageEndpointConfig,
+	tcpMessageEndpointconfig TCPMessageEndpointConfig, member *Member) *SWIM {
 	if config.T < config.AckTimeOut {
 		iLogger.Panic(nil, "T time must be longer than ack time-out")
 	}
@@ -124,6 +126,9 @@ func New(config *Config, suspicionConfig *SuspicionConfig, messageEndpointConfig
 
 	messageEndpoint := messageEndpointFactory(config, messageEndpointConfig, &swim)
 	swim.messageEndpoint = messageEndpoint
+
+	tcpMessageEndpoint := NewTCPMessageEndpoint(tcpMessageEndpointconfig, &swim)
+	swim.tcpMessageEndpoint = tcpMessageEndpoint
 
 	return &swim
 }
@@ -151,6 +156,7 @@ func messageEndpointFactory(config *Config, messageEndpointConfig MessageEndpoin
 func (s *SWIM) Start() {
 	atomic.CompareAndSwapInt32(&s.stopFlag, DIE, AVAILABLE)
 	go s.messageEndpoint.Listen()
+	go s.tcpMessageEndpoint.Listen()
 	s.startFailureDetector()
 }
 
@@ -158,7 +164,7 @@ func (s *SWIM) Start() {
 func (s *SWIM) Join(peerAddresses []string) error {
 
 	for _, address := range peerAddresses {
-		err := s.exchangeMembership(address)
+		err := s.exchangeMembership(address, s.tcpMessageEndpoint.config.IP+":"+strconv.Itoa(s.tcpMessageEndpoint.config.Port))
 		if err != nil {
 			iLogger.Error(nil, "error while join"+err.Error())
 		}
@@ -172,14 +178,14 @@ func (s *SWIM) GetMemberMap() MemberMap {
 	return *s.memberMap
 }
 
-func (s *SWIM) exchangeMembership(address string) error {
+func (s *SWIM) exchangeMembership(targetAddr string, localAddr string) error {
 
 	// Create membership message
 	membership := s.createMembership()
 
 	// Exchange membership
-	err := s.tcpMessageEndpoint.Send(address, pb.Message{
-		Address: s.member.Address(),
+	err := s.tcpMessageEndpoint.Send(targetAddr, pb.Message{
+		Address: localAddr,
 		Id:      xid.New().String(),
 		Payload: &pb.Message_Membership{
 			Membership: membership,
@@ -341,6 +347,7 @@ func (s *SWIM) Gossip(msg []byte) {
 func (s *SWIM) ShutDown() {
 	atomic.CompareAndSwapInt32(&s.stopFlag, AVAILABLE, DIE)
 	s.messageEndpoint.Shutdown()
+	s.tcpMessageEndpoint.Shutdown()
 	s.quitFD <- struct{}{}
 }
 
@@ -575,7 +582,7 @@ func (s *SWIM) indirectProbe(target *Member) error {
 //    piggyback message sent from target member.
 func (s *SWIM) ping(target *Member) error {
 	var stats *pb.MbrStatsMsg = nil
-	if !s.mbrStatsMsgStore.IsEmpty(){
+	if !s.mbrStatsMsgStore.IsEmpty() {
 		data, err := s.mbrStatsMsgStore.Get()
 		stats = &data
 		if err != nil {
@@ -610,7 +617,7 @@ func (s *SWIM) ping(target *Member) error {
 // received ACK message or when in the exceptional situation
 func (s *SWIM) indirectPing(mediator, target Member) (pb.Message, error) {
 	var stats *pb.MbrStatsMsg = nil
-	if !s.mbrStatsMsgStore.IsEmpty(){
+	if !s.mbrStatsMsgStore.IsEmpty() {
 		data, err := s.mbrStatsMsgStore.Get()
 		stats = &data
 		if err != nil {
@@ -686,7 +693,7 @@ func (s *SWIM) handle(msg pb.Message) {
 
 // handle piggyback related to member status
 func (s *SWIM) handlePbk(piggyBack *pb.PiggyBack) {
-	if piggyBack.MbrStatsMsg == nil{
+	if piggyBack.MbrStatsMsg == nil {
 		return
 	}
 	mbrStatsMsg := piggyBack.MbrStatsMsg
@@ -699,7 +706,7 @@ func (s *SWIM) handlePing(msg pb.Message) {
 	id := msg.Id
 
 	var stats *pb.MbrStatsMsg = nil
-	if !s.mbrStatsMsgStore.IsEmpty(){
+	if !s.mbrStatsMsgStore.IsEmpty() {
 		data, err := s.mbrStatsMsgStore.Get()
 		stats = &data
 		if err != nil {
@@ -727,7 +734,7 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 
 	// retrieve piggyback data from pbkStore
 	var stats *pb.MbrStatsMsg = nil
-	if !s.mbrStatsMsgStore.IsEmpty(){
+	if !s.mbrStatsMsgStore.IsEmpty() {
 		data, err := s.mbrStatsMsgStore.Get()
 		stats = &data
 		if err != nil {
@@ -759,7 +766,7 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 	}
 
 	stats = nil
-	if !s.mbrStatsMsgStore.IsEmpty(){
+	if !s.mbrStatsMsgStore.IsEmpty() {
 		data, err := s.mbrStatsMsgStore.Get()
 		stats = &data
 		if err != nil {
@@ -784,7 +791,7 @@ func (s *SWIM) handleMembership(membership *pb.Membership, msg pb.Message) {
 
 	// Reply
 	err := s.tcpMessageEndpoint.Send(msg.Address, pb.Message{
-		Address: s.member.Address(),
+		Address: s.tcpMessageEndpoint.config.IP+":"+strconv.Itoa(s.tcpMessageEndpoint.config.Port),
 		Id:      msg.Id,
 		Payload: &pb.Message_Membership{
 			Membership: m,
