@@ -8,12 +8,14 @@ import (
 	"github.com/golang/protobuf/proto"
 	"strconv"
 	"errors"
-)
+	"strings"
+	"github.com/DE-labtory/iLogger"
+	)
 
 const (
 	fillBufChar = ":"
 	// sendDataSizeInfoLength is used to check size of data to send
-	sendDataSizeInfoLength = 15
+	sendDataSizeInfoLength = 30
 	tcpBufferSize          = 65536
 )
 
@@ -50,16 +52,36 @@ func NewTCPMessageEndpoint(config TCPMessageEndpointConfig, messageHandler Messa
 	}
 }
 func (t *TCPMessageEndpoint) Listen() {
-	for {
-		select {
-		case msg := <-t.processCh:
-			t.messageHandler.handle(msg)
 
+	server, err := net.Listen("tcp", t.config.ServerAddress)
+	if err != nil {
+		iLogger.Panic(nil, "[TCPMessageEndpoint] panic in initial listen")
+	}
+	for {
+		if t.isShutdown {
+			//todo is enough ?
+			return
 		}
+		conn, err := server.Accept()
+		if err != nil {
+			conn.Close()
+			iLogger.Error(nil, "[TCPMessageEndpoint] error in accept")
+			continue
+		}
+
+		t.connMap[conn.RemoteAddr().String()] = conn
+		t.sendLockMap[conn.RemoteAddr().String()] = &sync.Mutex{}
+		go t.startReceiver(conn)
 	}
 }
 func (t *TCPMessageEndpoint) Send(addr string, msg pb.Message) error {
 	conn, l, err := t.getConnAndLock(addr)
+
+	if err == ErrConnIsNotExist{
+		t.makeConnAndLock(addr)
+		err = nil
+	}
+
 	if err != nil {
 		return err
 	}
@@ -104,25 +126,87 @@ func (t *TCPMessageEndpoint) Send(addr string, msg pb.Message) error {
 
 	return nil
 }
-func (t *TCPMessageEndpoint) listen() error {
-	server, err := net.Listen("tcp", t.config.ServerAddress)
-	if err != nil {
-		return err
+
+func (t *TCPMessageEndpoint) Shutdown() {
+	t.isShutdown = true
+
+	for _, conn := range t.connMap{
+		conn.Close()
 	}
+}
+func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
+
 	for {
-		if t.isShutdown {
-			//todo make this
-			return nil
-		}
-		conn,err := server.Accept()
-		if err!=nil{
-			return err
+		// todo check shutdown gracefully
+		if t.isShutdown{
+			return
 		}
 
-		t.connMap[conn.RemoteAddr().String()] = conn
-		t.sendLockMap[conn.RemoteAddr().String()] = &sync.Mutex{}
+		bufferDataSize := make([]byte, sendDataSizeInfoLength)
+
+		_, err := conn.Read(bufferDataSize)
+		if err != nil {
+			iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver, read data size")
+
+			conn.Close()
+			t.removeAddrInfo(conn.RemoteAddr().String())
+			return
+		}
+
+		dataSize, err := strconv.ParseInt(strings.Trim(string(bufferDataSize), fillBufChar), 10, 64)
+
+		if err != nil {
+			iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver parse int")
+
+			conn.Close()
+			t.removeAddrInfo(conn.RemoteAddr().String())
+			return
+		}
+		var receivedBytes int64
+		receivedData := make([]byte,0)
+		for {
+
+			if (dataSize - receivedBytes) < tcpBufferSize {
+				tempReceived := make([]byte, (receivedBytes+tcpBufferSize)-dataSize)
+				_,err := conn.Read(tempReceived)
+
+				if err != nil {
+					iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver read received")
+
+					conn.Close()
+					t.removeAddrInfo(conn.RemoteAddr().String())
+					return
+				}
+				receivedData = append(receivedData, tempReceived...)
+				break
+			}
+			tempReceived := make([]byte,tcpBufferSize)
+			_,err := conn.Read(tempReceived)
+
+			if err != nil {
+				iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver read max received")
+
+				conn.Close()
+				t.removeAddrInfo(conn.RemoteAddr().String())
+				return
+			}
+
+			receivedData = append(receivedData, tempReceived...)
+			receivedBytes += tcpBufferSize
+		}
+
+		msg := &pb.Message{}
+		if err := proto.Unmarshal(receivedData, msg); err != nil {
+			iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver unmarshal received data")
+
+			conn.Close()
+			t.removeAddrInfo(conn.RemoteAddr().String())
+			return
+		}
+		t.messageHandler.handle(*msg)
 
 	}
+
 }
 func (t *TCPMessageEndpoint) makeConnAndLock(addr string) (net.Conn, *sync.Mutex, error) {
 	c, l, e := t.getConnAndLock(addr)

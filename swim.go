@@ -86,6 +86,9 @@ type SWIM struct {
 	// messageEndpoint work both as message transmitter and message receiver
 	messageEndpoint MessageEndpoint
 
+	// tcpMessageEndpoint work both as message transmitter and message receiver in tcp
+	tcpMessageEndpoint TCPMessageEndpoint
+
 	// Information of this node
 	member *Member
 
@@ -175,7 +178,7 @@ func (s *SWIM) exchangeMembership(address string) error {
 	membership := s.createMembership()
 
 	// Exchange membership
-	msg, err := s.messageEndpoint.SyncSend(address, pb.Message{
+	err := s.tcpMessageEndpoint.Send(address, pb.Message{
 		Address: s.member.Address(),
 		Id:      xid.New().String(),
 		Payload: &pb.Message_Membership{
@@ -185,28 +188,6 @@ func (s *SWIM) exchangeMembership(address string) error {
 
 	if err != nil {
 		return err
-	}
-
-	// Handle received membership
-	switch msgPayload := msg.Payload.(type) {
-	case *pb.Message_Membership:
-
-		// if new one
-		if !s.memberMap.IsMember(MemberID{ID: msgPayload.Membership.SenderId,}) {
-			stats := &pb.MbrStatsMsg{
-				Type:        pb.MbrStatsMsg_Alive,
-				Id:          msgPayload.Membership.SenderId,
-				Incarnation: uint32(0),
-				Address:     msg.Address,
-			}
-			s.handleMbrStatsMsg(stats)
-		}
-
-		for _, m := range msgPayload.Membership.MbrStatsMsgs {
-			s.handleMbrStatsMsg(m)
-		}
-	default:
-		return errors.New("invaild response message")
 	}
 
 	return nil
@@ -802,7 +783,7 @@ func (s *SWIM) handleMembership(membership *pb.Membership, msg pb.Message) {
 	m := s.createMembership()
 
 	// Reply
-	err := s.messageEndpoint.Send(msg.Address, pb.Message{
+	err := s.tcpMessageEndpoint.Send(msg.Address, pb.Message{
 		Address: s.member.Address(),
 		Id:      msg.Id,
 		Payload: &pb.Message_Membership{
