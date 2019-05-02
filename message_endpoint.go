@@ -18,8 +18,7 @@ package swim
 
 import (
 	"errors"
-	"fmt"
-	"sync"
+		"sync"
 	"time"
 
 	"github.com/DE-labtory/iLogger"
@@ -121,7 +120,6 @@ type MessageEndpoint interface {
 }
 
 type MessageEndpointConfig struct {
-	ID                string
 	EncryptionEnabled bool
 	SendTimeout       time.Duration
 
@@ -243,24 +241,10 @@ func (m *DefaultMessageEndpoint) SyncSend(addr string, msg pb.Message) (pb.Messa
 	// member with @addr sent back us packet
 	m.resHandler.addCallback(msg.Id, callback{
 		fn: func(msg pb.Message) {
-			switch p := msg.Payload.(type) {
-			case *pb.Message_Ping:
-				fmt.Println("PROCESS : " + m.config.ID + ",MSG : ping," + msg.Address+","+p.Ping.String())
-			case *pb.Message_Ack:
-				fmt.Println("PROCESS : " + m.config.ID + ",MSG : ack," + msg.Address)
-			case *pb.Message_IndirectPing:
-				fmt.Println("PROCESS : " + m.config.ID + ",MSG : indp" + msg.Address)
-			case *pb.Message_Membership:
-				fmt.Println("PROCESS : " + m.config.ID + ",MSG : mem" + msg.Address)
-			default:
-				fmt.Println("PROCESS : " + m.config.ID + ",MSG : DEFA!!,")
-			}
-
 			onSucc <- msg
 		},
 		created: time.Now(),
 	})
-	iLogger.Warn(nil, "add callback, id : "+msg.Id+"to : "+msg.Address)
 
 	// send the message
 	_, err = m.transport.WriteTo(d, addr)
@@ -297,7 +281,6 @@ func (m *DefaultMessageEndpoint) Send(addr string, msg pb.Message) error {
 		iLogger.Info(nil, err.Error())
 		return err
 	}
-
 	return nil
 }
 
