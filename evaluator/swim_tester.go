@@ -10,12 +10,12 @@ import (
 
 func beforeTester() {
 
-	swim1 := SetupSwim("127.0.0.1", 5000, "1")
-	swim2 := SetupSwim("127.0.0.1", 5001, "2")
-	swim3 := SetupSwim("127.0.0.1", 5002, "3")
-	swim4 := SetupSwim("127.0.0.1", 5003, "4")
-	swim5 := SetupSwim("127.0.0.1", 5004, "5")
-	swim6 := SetupSwim("127.0.0.1", 5005, "6")
+	swim1 := SetupSwim("127.0.0.1", 45000, "1")
+	swim2 := SetupSwim("127.0.0.1", 45001, "2")
+	swim3 := SetupSwim("127.0.0.1", 45002, "3")
+	swim4 := SetupSwim("127.0.0.1", 45003, "4")
+	swim5 := SetupSwim("127.0.0.1", 45004, "5")
+	swim6 := SetupSwim("127.0.0.1", 45005, "6")
 
 	go swim1.Start()
 	go swim2.Start()
@@ -25,37 +25,37 @@ func beforeTester() {
 	go swim6.Start()
 	time.Sleep(300 * time.Millisecond)
 
-	err := swim1.Join([]string{"127.0.0.1:15005"})
+	err := swim1.Join([]string{"127.0.0.1:55005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim2.Join([]string{"127.0.0.1:15005"})
+	err = swim2.Join([]string{"127.0.0.1:55005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim3.Join([]string{"127.0.0.1:15005"})
+	err = swim3.Join([]string{"127.0.0.1:55005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim4.Join([]string{"127.0.0.1:15005"})
+	err = swim4.Join([]string{"127.0.0.1:55005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim5.Join([]string{"127.0.0.1:15005"})
+	err = swim5.Join([]string{"127.0.0.1:55005"})
 	if err != nil {
 		print(err)
 		return
 	}
 
-	err = swim6.Join([]string{"127.0.0.1:15005"})
+	err = swim6.Join([]string{"127.0.0.1:55005"})
 	if err != nil {
 		print(err)
 		return

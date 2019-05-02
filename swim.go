@@ -166,7 +166,7 @@ func (s *SWIM) Join(peerAddresses []string) error {
 	for _, address := range peerAddresses {
 		err := s.exchangeMembership(address, s.tcpMessageEndpoint.config.IP+":"+strconv.Itoa(s.tcpMessageEndpoint.config.Port))
 		if err != nil {
-			iLogger.Error(nil, "error while join"+err.Error())
+			iLogger.Error(nil, "error while join : "+err.Error())
 		}
 		iLogger.Info(nil, "add new member : "+address)
 	}
