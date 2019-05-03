@@ -10,13 +10,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"fmt"
 )
 
 const (
 	fillBufChar = ":"
 	// sendDataSizeInfoLength is used to check size of data to send
 	sendDataSizeInfoLength = 30
-	tcpBufferSize          = 65536
+	sendIDInfoLength       = 60
+	tcpBufferSize          = 1024
+	endOfIdChar            = "*EOI*"
 )
 
 var ErrConnIsNotExist = errors.New("no connection in map")
@@ -26,13 +29,14 @@ type TCPMessageEndpointConfig struct {
 	TCPTimeout        time.Duration
 	IP                string
 	Port              int
+	MyId              MemberID
 }
 
 type TCPMessageEndpoint struct {
 	config         TCPMessageEndpointConfig
 	messageHandler MessageHandler
-	connMap        map[string]net.Conn
-	sendLockMap    map[string]*sync.Mutex
+	connMap        map[MemberID]net.Conn
+	sendLockMap    map[MemberID]*sync.Mutex
 	processCh      chan pb.Message
 	processLock    sync.Mutex
 	isShutdown     bool
@@ -46,8 +50,8 @@ func NewTCPMessageEndpoint(config TCPMessageEndpointConfig, messageHandler Messa
 	return TCPMessageEndpoint{
 		config:         config,
 		messageHandler: messageHandler,
-		connMap:        make(map[string]net.Conn),
-		sendLockMap:    make(map[string]*sync.Mutex),
+		connMap:        make(map[MemberID]net.Conn),
+		sendLockMap:    make(map[MemberID]*sync.Mutex),
 		processLock:    sync.Mutex{},
 		isShutdown:     false,
 	}
@@ -70,16 +74,48 @@ func (t *TCPMessageEndpoint) Listen() {
 			continue
 		}
 
-		t.connMap[conn.RemoteAddr().String()] = conn
-		t.sendLockMap[conn.RemoteAddr().String()] = &sync.Mutex{}
-		go t.startReceiver(conn)
+		idBuf := make([]byte, 1024)
+		_, err = conn.Read(idBuf)
+		if err != nil {
+			iLogger.Error(nil, "[TCPMessageEndpoint] error in read ID in listen")
+			conn.Close()
+			continue
+		}
+		recvStr := string(idBuf[:])
+		if strings.Contains(recvStr, endOfIdChar) != true {
+			iLogger.Error(nil, "[TCPMessageEndpoint] error in recv Id in listen")
+			conn.Close()
+			continue
+		}
+
+
+		_, err = conn.Write([]byte(t.config.MyId.ID + endOfIdChar))
+		if err != nil {
+			iLogger.Error(nil, "[TCPMessageEndpoint] error in write Id in listen")
+			conn.Close()
+			continue
+		}
+
+
+		recvId := recvStr[:len(recvStr)-len(endOfIdChar)]
+		t.connMap[MemberID{ID: recvId}] = conn
+		lock := &sync.Mutex{}
+		t.sendLockMap[MemberID{ID: recvId}] = lock
+		go t.startReceiver(MemberID{ID: recvId}, conn)
 	}
 }
-func (t *TCPMessageEndpoint) Send(addr string, msg pb.Message) error {
-	conn, l, err := t.getConnAndLock(addr)
+
+func (t *TCPMessageEndpoint) Send(mbr Member, msg pb.Message) error {
+	if mbr.ID == (MemberID{}) {
+		_, _, err := t.makeConnAndLock(mbr.Address())
+		if err != nil{
+			return err
+		}
+	}
+	conn, l, err := t.getConnAndLock(mbr.ID)
 
 	if err == ErrConnIsNotExist {
-		conn, l, err = t.makeConnAndLock(addr)
+		conn, l, err = t.makeConnAndLock(mbr.Address())
 	}
 
 	if err != nil {
@@ -94,7 +130,7 @@ func (t *TCPMessageEndpoint) Send(addr string, msg pb.Message) error {
 
 	_, err = conn.Write([]byte(dataLength))
 	if err != nil {
-		t.removeAddrInfo(addr)
+		t.removeTCPInfo(mbr.ID)
 		return err
 	}
 
@@ -106,7 +142,7 @@ func (t *TCPMessageEndpoint) Send(addr string, msg pb.Message) error {
 
 			_, err = conn.Write(sendBuffer)
 			if err != nil {
-				t.removeAddrInfo(addr)
+				t.removeTCPInfo(mbr.ID)
 				return err
 			}
 			data = data[tcpBufferSize+1:]
@@ -117,7 +153,7 @@ func (t *TCPMessageEndpoint) Send(addr string, msg pb.Message) error {
 
 		_, err = conn.Write(sendBuffer)
 		if err != nil {
-			t.removeAddrInfo(addr)
+			t.removeTCPInfo(mbr.ID)
 			return err
 		}
 
@@ -134,7 +170,7 @@ func (t *TCPMessageEndpoint) Shutdown() {
 		conn.Close()
 	}
 }
-func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
+func (t *TCPMessageEndpoint) startReceiver(mbrId MemberID, conn net.Conn) {
 
 	for {
 		// todo check shutdown gracefully
@@ -149,7 +185,7 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 			iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver, read data size")
 
 			conn.Close()
-			t.removeAddrInfo(conn.RemoteAddr().String())
+			t.removeTCPInfo(mbrId)
 			return
 		}
 
@@ -159,7 +195,7 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 			iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver parse int")
 
 			conn.Close()
-			t.removeAddrInfo(conn.RemoteAddr().String())
+			t.removeTCPInfo(mbrId)
 			return
 		}
 		var receivedBytes int64
@@ -174,7 +210,7 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 					iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver read received")
 
 					conn.Close()
-					t.removeAddrInfo(conn.RemoteAddr().String())
+					t.removeTCPInfo(mbrId)
 					return
 				}
 				receivedData = append(receivedData, tempReceived...)
@@ -187,7 +223,7 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 				iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver read max received")
 
 				conn.Close()
-				t.removeAddrInfo(conn.RemoteAddr().String())
+				t.removeTCPInfo(mbrId)
 				return
 			}
 
@@ -200,7 +236,7 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 			iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver unmarshal received data")
 
 			conn.Close()
-			t.removeAddrInfo(conn.RemoteAddr().String())
+			t.removeTCPInfo(mbrId)
 			return
 		}
 		t.messageHandler.handle(*msg)
@@ -209,56 +245,63 @@ func (t *TCPMessageEndpoint) startReceiver(conn net.Conn) {
 
 }
 func (t *TCPMessageEndpoint) makeConnAndLock(addr string) (net.Conn, *sync.Mutex, error) {
-	c, l, e := t.getConnAndLock(addr)
-	if e == nil {
-		return c, l, e
-	}
-	dialer := &net.Dialer{
-		Timeout: t.config.TCPTimeout,
-		LocalAddr: &net.TCPAddr{
-			IP:   net.ParseIP(t.config.IP),
-			Port: t.config.Port,
-		},
-
-	}
-	c, err := dialer.Dial("tcp", addr)
+	c, err := net.DialTimeout("tcp", addr, t.config.TCPTimeout)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	t.connMap[addr] = c
+	// exchange id
+	arr := []byte(t.config.MyId.ID + endOfIdChar)
+	strt := string(arr[:])
+	fmt.Println(strt)
+	_, err = c.Write([]byte(t.config.MyId.ID + endOfIdChar))
+	if err != nil {
+		return nil, nil, err
+	}
+	idBuf := make([]byte, 1024)
+	_, err = c.Read(idBuf)
+	if err != nil {
+		return nil, nil, err
+	}
+	recvStr := string(idBuf[:])
+	if strings.Contains(recvStr, endOfIdChar) != true {
+		return nil, nil, errors.New("error in recv Id")
+	}
+	recvId := recvStr[:len(recvStr)-len(endOfIdChar)]
+
+	t.connMap[MemberID{ID: recvId}] = c
 
 	lock := &sync.Mutex{}
-	t.sendLockMap[addr] = lock
+	t.sendLockMap[MemberID{ID: recvId}] = lock
 
 	return c, lock, nil
 }
 
-func (t *TCPMessageEndpoint) getConnAndLock(addr string) (net.Conn, *sync.Mutex, error) {
+func (t *TCPMessageEndpoint) getConnAndLock(id MemberID) (net.Conn, *sync.Mutex, error) {
 	t.processLock.Lock()
 	defer t.processLock.Unlock()
 
-	conn, ok := t.connMap[addr]
+	conn, ok := t.connMap[id]
 	if !ok {
 		return nil, nil, ErrConnIsNotExist
 	}
 
-	sLock, ok := t.sendLockMap[addr]
+	sLock, ok := t.sendLockMap[id]
 	if !ok {
 		lock := sync.Mutex{}
-		t.sendLockMap[addr] = &lock
+		t.sendLockMap[id] = &lock
 		sLock = &lock
 	}
 
 	return conn, sLock, nil
 }
 
-func (t *TCPMessageEndpoint) removeAddrInfo(addr string) {
-	if conn, ok := t.connMap[addr]; ok {
+func (t *TCPMessageEndpoint) removeTCPInfo(id MemberID) {
+	if conn, ok := t.connMap[id]; ok {
 		conn.Close()
-		delete(t.connMap, addr)
+		delete(t.connMap, id)
 	}
-	delete(t.sendLockMap, addr)
+	delete(t.sendLockMap, id)
 }
 
 func fillString(rawStr string, toLength int) string {

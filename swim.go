@@ -29,6 +29,8 @@ import (
 	"github.com/DE-labtory/iLogger"
 	"github.com/DE-labtory/swim/pb"
 	"github.com/rs/xid"
+	"strings"
+	"net"
 )
 
 var ErrInvalidMbrStatsMsgType = errors.New("error invalid mbrStatsMsg type")
@@ -164,7 +166,7 @@ func (s *SWIM) Start() {
 func (s *SWIM) Join(peerAddresses []string) error {
 
 	for _, address := range peerAddresses {
-		err := s.exchangeMembership(address, s.tcpMessageEndpoint.config.IP+":"+strconv.Itoa(s.tcpMessageEndpoint.config.Port))
+		err := s.exchangeMembership(address)
 		if err != nil {
 			iLogger.Error(nil, "error while join : "+err.Error())
 		}
@@ -178,14 +180,22 @@ func (s *SWIM) GetMemberMap() MemberMap {
 	return *s.memberMap
 }
 
-func (s *SWIM) exchangeMembership(targetAddr string, localAddr string) error {
+func (s *SWIM) exchangeMembership(targetAddr string) error {
 
 	// Create membership message
 	membership := s.createMembership()
+	addrInfo := strings.Split(targetAddr, ":")
+	ip, port := addrInfo[0], addrInfo[1]
+	intPort,err := strconv.Atoi(port)
+	if err != nil{
+		return err
+	}
+
+	uPort := uint16(intPort)
 
 	// Exchange membership
-	err := s.tcpMessageEndpoint.Send(targetAddr, pb.Message{
-		Address: localAddr,
+	err = s.tcpMessageEndpoint.Send(Member{Addr:net.ParseIP(ip),Port:uPort}, pb.Message{
+		Address: s.member.Address(),
 		Id:      xid.New().String(),
 		Payload: &pb.Message_Membership{
 			Membership: membership,
@@ -786,11 +796,25 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 func (s *SWIM) handleMembership(membership *pb.Membership, msg pb.Message) {
 	payload := msg.Payload.(*pb.Message_Membership)
 
+	// add member if sender is not in membership
+	if !s.memberMap.IsMember(MemberID{ID: payload.Membership.SenderId,}) {
+		stats := &pb.MbrStatsMsg{
+			Type:        pb.MbrStatsMsg_Alive,
+			Id:          payload.Membership.SenderId,
+			Incarnation: uint32(0),
+			Address:     msg.Address,
+		}
+		s.handleMbrStatsMsg(stats)
+
+
+	}
+
 	// Create membership message
 	m := s.createMembership()
 
 	// Reply
-	err := s.tcpMessageEndpoint.Send(msg.Address, pb.Message{
+	mbr := s.memberMap.members[MemberID{ID: payload.Membership.SenderId,}]
+	err := s.tcpMessageEndpoint.Send(*mbr, pb.Message{
 		Address: s.tcpMessageEndpoint.config.IP+":"+strconv.Itoa(s.tcpMessageEndpoint.config.Port),
 		Id:      msg.Id,
 		Payload: &pb.Message_Membership{
@@ -807,21 +831,7 @@ func (s *SWIM) handleMembership(membership *pb.Membership, msg pb.Message) {
 		s.handleMbrStatsMsg(m)
 	}
 
-	// add member if sender is not in membership
-	if !s.memberMap.IsMember(MemberID{ID: payload.Membership.SenderId,}) {
-		stats := &pb.MbrStatsMsg{
-			Type:        pb.MbrStatsMsg_Alive,
-			Id:          payload.Membership.SenderId,
-			Incarnation: uint32(0),
-			Address:     msg.Address,
-		}
-		s.handleMbrStatsMsg(stats)
 
-		if err != nil {
-			iLogger.Error(nil, "error while handle membership"+err.Error())
-		}
-
-	}
 
 }
 

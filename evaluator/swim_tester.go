@@ -151,6 +151,7 @@ func SetupSwim(ip string, port int, id string) *swim.SWIM {
 		TCPTimeout:        2 * time.Second,
 		IP:                ip,
 		Port:              port + 10000,
+		MyId:              swim.MemberID{ID: id},
 	}
 	swimObj := swim.New(&swimConfig, &suspicionConfig, messageEndpointConfig, tcpEndpointconfig, &swim.Member{
 		ID:               swim.MemberID{ID: id},
