@@ -111,6 +111,9 @@ type Member struct {
 	// Suspicion manages the suspect timer and helps to accelerate the timeout
 	// as member self got more independent confirmations that a target member is suspect.
 	Suspicion *Suspicion
+
+	// Time last exchange membership
+	LastExchangeMembership time.Time
 }
 
 type MemberMessage struct {
