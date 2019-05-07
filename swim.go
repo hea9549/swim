@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strconv"
 	"sync"
 	"time"
 
@@ -29,14 +28,12 @@ import (
 	"github.com/DE-labtory/iLogger"
 	"github.com/DE-labtory/swim/pb"
 	"github.com/rs/xid"
-	"net"
-	"strings"
 )
 
 var ErrInvalidMbrStatsMsgType = errors.New("error invalid mbrStatsMsg type")
 var ErrPingFailed = errors.New("error ping failed")
 var ErrIndProbeFailed = errors.New("error when indirect-probe failed")
-var ErrInvalidPayloadType = errors.New("invalid indirect-ping response payload type")
+var ErrInvalidPayloadType = errors.New("invalid indirect-ping response Payload type")
 
 type ProbeResponse struct {
 	err error
@@ -74,6 +71,9 @@ type Config struct {
 	// my address and port
 	BindAddress string
 	BindPort    int
+
+	// Exchange Membership Period
+	TryExchangeMembershipPeriod int
 }
 
 type SWIM struct {
@@ -166,7 +166,9 @@ func (s *SWIM) Start() {
 func (s *SWIM) Join(peerAddresses []string) error {
 
 	for _, address := range peerAddresses {
-		err := s.exchangeMembership(address)
+		host, port, err := ParseHostPort(address)
+		m := Member{Addr: host, TCPPort: port}
+		err = s.exchangeMembership(m)
 		if err != nil {
 			iLogger.Error(nil, "error while join : "+err.Error())
 		}
@@ -180,30 +182,32 @@ func (s *SWIM) GetMemberMap() MemberMap {
 	return *s.memberMap
 }
 
-func (s *SWIM) exchangeMembership(targetAddr string) error {
-
+func (s *SWIM) exchangeMembership(mbr Member) error {
 	// Create membership message
 	membership := s.createMembership()
-	addrInfo := strings.Split(targetAddr, ":")
-	ip, port := addrInfo[0], addrInfo[1]
-	intPort, err := strconv.Atoi(port)
-	if err != nil {
-		return err
-	}
 
-	uPort := uint16(intPort)
-
-	// Exchange membership
-	err = s.tcpMessageEndpoint.Send(Member{Addr: net.ParseIP(ip), Port: uPort}, pb.Message{
-		Address: s.member.Address(),
+	msg := pb.Message{
+		Address: s.member.UDPAddress(),
 		Id:      xid.New().String(),
 		Payload: &pb.Message_Membership{
 			Membership: membership,
 		},
-	})
+	}
+
+	// Try to exchange membership with member info
+	if s.memberMap.IsMember(mbr.ID) {
+		err := s.tcpMessageEndpoint.SendToMember(mbr, msg)
+		if err != nil {
+			return nil
+		}
+	}
+
+	// Exchange membership with address
+	err := s.tcpMessageEndpoint.SendToAddr(mbr.TCPAddress(), msg)
 
 	if err != nil {
 		return err
+
 	}
 
 	return nil
@@ -212,15 +216,18 @@ func (s *SWIM) exchangeMembership(targetAddr string) error {
 func (s *SWIM) createMembership() *pb.Membership {
 
 	membership := &pb.Membership{
-		SenderId:     s.member.ID.ID,
-		MbrStatsMsgs: make([]*pb.MbrStatsMsg, 0),
+		SenderId:         s.member.ID.ID,
+		SenderUdpAddress: s.member.UDPAddress(),
+		SenderTcpAddress: s.member.TCPAddress(),
+		MbrStatsMsgs:     make([]*pb.MbrStatsMsg, 0),
 	}
 	for _, m := range s.memberMap.GetMembers() {
 		membership.MbrStatsMsgs = append(membership.MbrStatsMsgs, &pb.MbrStatsMsg{
 			Incarnation: m.Incarnation,
 			Id:          m.GetIDString(),
-			Type:        pb.MbrStatsMsg_Type(m.Status.toInt()),
-			Address:     m.Address(),
+			Type:        pb.MbrStatsMsg_Type(m.Status.Int()),
+			UdpAddress:  m.UDPAddress(),
+			TcpAddress:  m.TCPAddress(),
 		})
 	}
 
@@ -295,7 +302,8 @@ func (s *SWIM) convMbrStatsToAliveMsg(stats *pb.MbrStatsMsg) (AliveMessage, erro
 		return AliveMessage{}, ErrInvalidMbrStatsMsgType
 	}
 
-	host, port, err := ParseHostPort(stats.Address)
+	host, udpPort, err := ParseHostPort(stats.UdpAddress)
+	_, tcpPort, err := ParseHostPort(stats.TcpAddress)
 	if err != nil {
 		return AliveMessage{}, err
 	}
@@ -303,7 +311,8 @@ func (s *SWIM) convMbrStatsToAliveMsg(stats *pb.MbrStatsMsg) (AliveMessage, erro
 		MemberMessage: MemberMessage{
 			ID:          stats.Id,
 			Addr:        host,
-			Port:        port,
+			UDPPort:     udpPort,
+			TCPPort:     tcpPort,
 			Incarnation: stats.Incarnation,
 		},
 	}, nil
@@ -314,7 +323,8 @@ func (s *SWIM) convMbrStatsToSuspectMsg(stats *pb.MbrStatsMsg) (SuspectMessage, 
 		return SuspectMessage{}, ErrInvalidMbrStatsMsgType
 	}
 
-	host, port, err := ParseHostPort(stats.Address)
+	host, udpPort, err := ParseHostPort(stats.UdpAddress)
+	_, tcpPort, err := ParseHostPort(stats.TcpAddress)
 	if err != nil {
 		return SuspectMessage{}, err
 	}
@@ -322,7 +332,8 @@ func (s *SWIM) convMbrStatsToSuspectMsg(stats *pb.MbrStatsMsg) (SuspectMessage, 
 		MemberMessage: MemberMessage{
 			ID:          stats.Id,
 			Addr:        host,
-			Port:        port,
+			UDPPort:     udpPort,
+			TCPPort:     tcpPort,
 			Incarnation: stats.Incarnation,
 		},
 		ConfirmerID: s.member.ID.ID,
@@ -352,7 +363,9 @@ func (s *SWIM) refute(mbrStatsMsg *pb.MbrStatsMsg) {
 func (s *SWIM) Gossip(msg []byte) {
 
 }
-
+func (s *SWIM) IsRun()bool {
+	return atomic.LoadInt32(&(s.stopFlag)) == AVAILABLE
+}
 // Shutdown the running swim.
 func (s *SWIM) ShutDown() {
 	atomic.CompareAndSwapInt32(&s.stopFlag, AVAILABLE, DIE)
@@ -391,7 +404,10 @@ func (s *SWIM) toDie() bool {
 func (s *SWIM) startFailureDetector() {
 	go func() {
 		baseInterval := time.Millisecond * time.Duration(s.config.T)
-
+		if s.config.TryExchangeMembershipPeriod == 0 {
+			s.config.TryExchangeMembershipPeriod = 10
+		}
+		periodTick := 0
 		for !s.toDie() {
 			members := s.memberMap.GetMembers()
 			currentInterval := time.Duration(s.awareness.score+1) * baseInterval
@@ -402,10 +418,14 @@ func (s *SWIM) startFailureDetector() {
 
 			for _, m := range members {
 				currentInterval := time.Duration(s.awareness.score+1) * baseInterval
-				iLogger.Info(nil, "[swim] start probing ..."+s.member.ID.ID+"->"+m.ID.ID)
+				//iLogger.Info(nil, "[swim] start probing ..."+s.member.ID.ID+"->"+m.ID.ID)
 				s.probe(m, currentInterval)
-
-				iLogger.Info(nil, "[swim] done probing !"+s.member.ID.ID+"->"+m.ID.ID)
+				periodTick++
+				if periodTick >= s.config.TryExchangeMembershipPeriod {
+					s.exchangeMembership(m)
+					periodTick = 0
+				}
+				//iLogger.Info(nil, "[swim] done probing !"+s.member.ID.ID+"->"+m.ID.ID)
 
 			}
 
@@ -469,7 +489,7 @@ func (s *SWIM) probe(member Member, curInterval time.Duration) {
 			return nil, nil
 		}
 		resp := NewTaskRunner(task, ctx).Start()
-		end <- ProbeResponse{err: resp.err}
+		end <- ProbeResponse{err: resp.Err}
 	}()
 
 	select {
@@ -482,8 +502,8 @@ func (s *SWIM) probe(member Member, curInterval time.Duration) {
 		s.awareness.ApplyDelta(1)
 		s.suspect(&member, curInterval)
 
-	// if probe ended with error then suspect member and increase Awareness
-	// otherwise just decrease Awareness score
+		// if probe ended with error then suspect member and increase Awareness
+		// otherwise just decrease Awareness score
 	case resp := <-end:
 		if !resp.Ok() {
 			s.awareness.ApplyDelta(1)
@@ -535,15 +555,15 @@ func (s *SWIM) indirectProbe(target *Member) error {
 			}
 
 			resp := NewTaskRunner(task, ctx).Start()
-			if resp.err != nil {
+			if resp.Err != nil {
 				done <- IndProbeResponse{
-					err: resp.err,
+					err: resp.Err,
 					msg: pb.Message{},
 				}
 				return
 			}
 
-			msg, ok := resp.payload.(pb.Message)
+			msg, ok := resp.Payload.(pb.Message)
 			if !ok {
 				done <- IndProbeResponse{
 					err: ErrInvalidPayloadType,
@@ -603,9 +623,9 @@ func (s *SWIM) ping(target *Member) error {
 	}
 
 	// send ping message
-	addr := target.Address()
+	addr := target.UDPAddress()
 	pingId := xid.New().String()
-	ping := createPingMessage(pingId, s.member.Address(), stats)
+	ping := createPingMessage(pingId, s.member.UDPAddress(), stats)
 
 	res, err := s.messageEndpoint.SyncSend(addr, ping)
 	if err != nil {
@@ -638,9 +658,9 @@ func (s *SWIM) indirectPing(mediator, target Member) (pb.Message, error) {
 	}
 
 	// send indirect-ping message
-	addr := mediator.Address()
+	addr := mediator.UDPAddress()
 	indId := xid.New().String()
-	ind := createIndMessage(indId, s.member.Address(), target.Address(), stats)
+	ind := createIndMessage(indId, s.member.UDPAddress(), target.UDPAddress(), stats)
 
 	res, err := s.messageEndpoint.SyncSend(addr, ind)
 
@@ -687,7 +707,7 @@ func (s *SWIM) handle(msg pb.Message) {
 		s.handlePbk(msg.PiggyBack)
 	}
 
-	switch p := msg.Payload.(type) {
+	switch msg.Payload.(type) {
 	case *pb.Message_Ping:
 		s.handlePing(msg)
 	case *pb.Message_Ack:
@@ -695,7 +715,7 @@ func (s *SWIM) handle(msg pb.Message) {
 	case *pb.Message_IndirectPing:
 		s.handleIndirectPing(msg)
 	case *pb.Message_Membership:
-		s.handleMembership(p.Membership, msg)
+		s.handleMembership(msg)
 	default:
 
 	}
@@ -761,7 +781,7 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 	targetAddr := msg.Payload.(*pb.Message_IndirectPing).IndirectPing.Target
 
 	pingId := xid.New().String()
-	ping := createPingMessage(pingId, s.member.Address(), stats)
+	ping := createPingMessage(pingId, s.member.UDPAddress(), stats)
 
 	// first send the ping to target member, if target member could not send-back
 	// ack message for whatever reason send nack message to source member,
@@ -769,8 +789,8 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 	// to source member
 	if _, err := s.messageEndpoint.SyncSend(targetAddr, ping); err != nil {
 		//nack := createNackMessage(id, srcAddr, &mbrStatsMsg)
-		//if err := s.messageEndpoint.Send(srcAddr, nack); err != nil {
-		//			iLogger.Error(nil, err.Error())
+		//if Err := s.messageEndpoint.Send(srcAddr, nack); Err != nil {
+		//			iLogger.Error(nil, Err.Error())
 		//}
 		return
 	}
@@ -793,48 +813,56 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 
 // handleMembership receives Membership message.
 // create membership message with membermap and reply to the message with it.
-func (s *SWIM) handleMembership(membership *pb.Membership, msg pb.Message) {
+func (s *SWIM) handleMembership(msg pb.Message) {
 	payload := msg.Payload.(*pb.Message_Membership)
-
-	// check is recently sent
-	if s.memberMap.IsMember(MemberID{ID: payload.Membership.SenderId,}) {
-		if s.memberMap.members[MemberID{ID: payload.Membership.SenderId}].LastExchangeMembership.Sub(time.Now()) > 10*time.Second {
-
-			// Create membership message
-			m := s.createMembership()
-
-			// Reply
-			mbr := s.memberMap.members[MemberID{ID: payload.Membership.SenderId,}]
-			err := s.tcpMessageEndpoint.Send(*mbr, pb.Message{
-				Address: s.tcpMessageEndpoint.config.IP + ":" + strconv.Itoa(s.tcpMessageEndpoint.config.Port),
-				Id:      msg.Id,
-				Payload: &pb.Message_Membership{
-					Membership: m,
-				},
-			})
-
-			if err != nil {
-				iLogger.Error(nil, err.Error())
-				return
-			}
-		}
-	}
+	membership := payload.Membership
 	// add member if sender is not in membership
 	if !s.memberMap.IsMember(MemberID{ID: payload.Membership.SenderId,}) {
 		stats := &pb.MbrStatsMsg{
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          payload.Membership.SenderId,
 			Incarnation: uint32(0),
-			Address:     msg.Address,
+			UdpAddress:  payload.Membership.SenderUdpAddress,
+			TcpAddress:  payload.Membership.SenderTcpAddress,
 		}
 		s.handleMbrStatsMsg(stats)
 
 	}
+	// check is recently sent
+	if s.memberMap.IsMember(MemberID{ID: payload.Membership.SenderId,}) {
+		if time.Now().Sub(s.memberMap.members[MemberID{ID: payload.Membership.SenderId}].LastExchangeMembership) > 10*time.Second {
+
+			// Create membership message
+			m := s.createMembership()
+
+			// Reply
+			mbr := s.memberMap.members[MemberID{ID: payload.Membership.SenderId,}]
+			err := s.tcpMessageEndpoint.SendToMember(*mbr, pb.Message{
+				Address: s.member.UDPAddress(),
+				Id:      xid.New().String(),
+				Payload: &pb.Message_Membership{
+					Membership: m,
+				},
+			})
+			mbr.LastExchangeMembership = time.Now()
+			if err != nil {
+				iLogger.Error(nil, err.Error())
+				return
+			}
+		}
+	}
 
 	for _, m := range membership.MbrStatsMsgs {
+		if m.UdpAddress == s.member.UDPAddress() || m.Id == s.member.ID.ID {
+			continue
+		}
 		s.handleMbrStatsMsg(m)
 	}
 
+}
+
+func (s *SWIM) GetMyInfo() Member {
+	return *s.member
 }
 
 func createPingMessage(id, src string, mbrStatsMsg *pb.MbrStatsMsg) pb.Message {
@@ -896,7 +924,8 @@ func createSuspectMessage(suspect *Member, confirmer string) SuspectMessage {
 		MemberMessage: MemberMessage{
 			ID:          suspect.ID.ID,
 			Addr:        suspect.Addr,
-			Port:        suspect.Port,
+			UDPPort:     suspect.UDPPort,
+			TCPPort:     suspect.TCPPort,
 			Incarnation: suspect.Incarnation,
 		},
 		ConfirmerID: confirmer,

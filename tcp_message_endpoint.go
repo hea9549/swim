@@ -10,8 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"fmt"
-)
+	)
 
 const (
 	fillBufChar = ":"
@@ -75,19 +74,18 @@ func (t *TCPMessageEndpoint) Listen() {
 		}
 
 		idBuf := make([]byte, 1024)
-		_, err = conn.Read(idBuf)
+		readN, err := conn.Read(idBuf)
 		if err != nil {
 			iLogger.Error(nil, "[TCPMessageEndpoint] error in read ID in listen")
 			conn.Close()
 			continue
 		}
-		recvStr := string(idBuf[:])
+		recvStr := string(idBuf[:readN])
 		if strings.Contains(recvStr, endOfIdChar) != true {
 			iLogger.Error(nil, "[TCPMessageEndpoint] error in recv Id in listen")
 			conn.Close()
 			continue
 		}
-
 
 		_, err = conn.Write([]byte(t.config.MyId.ID + endOfIdChar))
 		if err != nil {
@@ -95,7 +93,6 @@ func (t *TCPMessageEndpoint) Listen() {
 			conn.Close()
 			continue
 		}
-
 
 		recvId := recvStr[:len(recvStr)-len(endOfIdChar)]
 		t.connMap[MemberID{ID: recvId}] = conn
@@ -105,18 +102,75 @@ func (t *TCPMessageEndpoint) Listen() {
 	}
 }
 
-func (t *TCPMessageEndpoint) Send(mbr Member, msg pb.Message) error {
-	if mbr.ID == (MemberID{}) {
-		_, _, err := t.makeConnAndLock(mbr.Address())
+func (t *TCPMessageEndpoint) SendToAddr(addr string, msg pb.Message) error {
+	t.processLock.Lock()
+	defer t.processLock.Unlock()
+	var conn net.Conn
+	var l *sync.Mutex
+	var mbrId MemberID
+
+	for id, c := range t.connMap {
+		if c.RemoteAddr().String() == addr {
+			conn = c
+			l = t.sendLockMap[id]
+			mbrId = id
+			break
+		}
+	}
+
+	if conn == nil{
+		mId, mc, ml, err := t.makeConnAndLock(addr)
+		conn = mc
+		l = ml
+		mbrId = mId
 		if err != nil{
 			return err
 		}
 	}
-	conn, l, err := t.getConnAndLock(mbr.ID)
 
-	if err == ErrConnIsNotExist {
-		conn, l, err = t.makeConnAndLock(mbr.Address())
+	l.Lock()
+	defer l.Unlock()
+
+	data, err := proto.Marshal(&msg)
+	dataLength := fillString(strconv.Itoa(len(data)), sendDataSizeInfoLength)
+
+	_, err = conn.Write([]byte(dataLength))
+	if err != nil {
+		t.removeTCPInfo(mbrId)
+		return err
 	}
+
+	for len(data) > 0 {
+		if len(data) > tcpBufferSize {
+			sendBuffer := make([]byte, tcpBufferSize)
+			copy(sendBuffer, data[:tcpBufferSize])
+
+			_, err = conn.Write(sendBuffer)
+			if err != nil {
+				t.removeTCPInfo(mbrId)
+				return err
+			}
+			data = data[tcpBufferSize:]
+			continue
+		}
+		sendBuffer := make([]byte, len(data))
+		copy(sendBuffer, data)
+
+		_, err = conn.Write(sendBuffer)
+		if err != nil {
+			t.removeTCPInfo(mbrId)
+			return err
+		}
+
+		data = data[len(data):]
+	}
+
+	return nil
+
+}
+func (t *TCPMessageEndpoint) SendToMember(mbr Member, msg pb.Message) error {
+
+	conn, l, err := t.getConnAndLock(mbr.ID)
 
 	if err != nil {
 		return err
@@ -134,10 +188,9 @@ func (t *TCPMessageEndpoint) Send(mbr Member, msg pb.Message) error {
 		return err
 	}
 
-	sendBuffer := make([]byte, tcpBufferSize)
 	for len(data) > 0 {
 		if len(data) > tcpBufferSize {
-
+			sendBuffer := make([]byte, tcpBufferSize)
 			copy(sendBuffer, data[:tcpBufferSize])
 
 			_, err = conn.Write(sendBuffer)
@@ -145,10 +198,10 @@ func (t *TCPMessageEndpoint) Send(mbr Member, msg pb.Message) error {
 				t.removeTCPInfo(mbr.ID)
 				return err
 			}
-			data = data[tcpBufferSize+1:]
+			data = data[tcpBufferSize:]
 			continue
 		}
-
+		sendBuffer := make([]byte, len(data))
 		copy(sendBuffer, data)
 
 		_, err = conn.Write(sendBuffer)
@@ -182,7 +235,7 @@ func (t *TCPMessageEndpoint) startReceiver(mbrId MemberID, conn net.Conn) {
 
 		_, err := conn.Read(bufferDataSize)
 		if err != nil {
-			iLogger.Error(nil, "[TCPMessageEndpoint] error in TCP receiver, read data size")
+			iLogger.Error(&iLogger.Fields{"from": t.config.MyId, "to": mbrId}, "[TCPMessageEndpoint] error in TCP receiver, read data size")
 
 			conn.Close()
 			t.removeTCPInfo(mbrId)
@@ -244,37 +297,33 @@ func (t *TCPMessageEndpoint) startReceiver(mbrId MemberID, conn net.Conn) {
 	}
 
 }
-func (t *TCPMessageEndpoint) makeConnAndLock(addr string) (net.Conn, *sync.Mutex, error) {
+func (t *TCPMessageEndpoint) makeConnAndLock(addr string) (MemberID, net.Conn, *sync.Mutex, error) {
 	c, err := net.DialTimeout("tcp", addr, t.config.TCPTimeout)
 	if err != nil {
-		return nil, nil, err
+		return MemberID{}, nil, nil, err
 	}
 
 	// exchange id
-	arr := []byte(t.config.MyId.ID + endOfIdChar)
-	strt := string(arr[:])
-	fmt.Println(strt)
 	_, err = c.Write([]byte(t.config.MyId.ID + endOfIdChar))
 	if err != nil {
-		return nil, nil, err
+		return MemberID{}, nil, nil, err
 	}
 	idBuf := make([]byte, 1024)
-	_, err = c.Read(idBuf)
+	readN, err := c.Read(idBuf)
 	if err != nil {
-		return nil, nil, err
+		return MemberID{}, nil, nil, err
 	}
-	recvStr := string(idBuf[:])
+	recvStr := string(idBuf[:readN])
 	if strings.Contains(recvStr, endOfIdChar) != true {
-		return nil, nil, errors.New("error in recv Id")
+		return MemberID{}, nil, nil, errors.New("error in recv Id")
 	}
 	recvId := recvStr[:len(recvStr)-len(endOfIdChar)]
 
 	t.connMap[MemberID{ID: recvId}] = c
-
 	lock := &sync.Mutex{}
 	t.sendLockMap[MemberID{ID: recvId}] = lock
-
-	return c, lock, nil
+	go t.startReceiver(MemberID{ID: recvId}, c)
+	return MemberID{ID: recvId},c, lock, nil
 }
 
 func (t *TCPMessageEndpoint) getConnAndLock(id MemberID) (net.Conn, *sync.Mutex, error) {

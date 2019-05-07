@@ -20,8 +20,8 @@ const (
 type Task func() (interface{}, error)
 
 type TaskResponse struct {
-	payload interface{}
-	err     error
+	Payload interface{}
+	Err     error
 }
 
 type TaskRunner struct {
@@ -60,14 +60,14 @@ func (t *TaskRunner) Start() TaskResponse {
 		if err != nil {
 			iLogger.Errorf(nil, "[TaskRunner] error occured: [%s]", err.Error())
 			done <- TaskResponse{
-				payload: nil,
-				err:     err,
+				Payload: nil,
+				Err:     err,
 			}
 			return
 		}
 		done <- TaskResponse{
-			payload: result,
-			err:     nil,
+			Payload: result,
+			Err:     nil,
 		}
 	}()
 

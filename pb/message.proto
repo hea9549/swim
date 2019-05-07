@@ -31,24 +31,26 @@ message Nack {
 
 }
 
-message IndirectPing{
+message IndirectPing {
     // indirect-ping's target address
     string target = 2;
     bool nack = 3;
 }
 
-message PiggyBack{
+message PiggyBack {
     MbrStatsMsg mbrStatsMsg = 1;
 }
 
 // Membership has a list of Member status messages
 message Membership {
     string senderId = 1;
-    repeated MbrStatsMsg mbrStatsMsgs = 2;
+    string senderUdpAddress = 2;
+    string senderTcpAddress = 3;
+    repeated MbrStatsMsg mbrStatsMsgs = 4;
 }
 
 // Member status message
-message MbrStatsMsg{
+message MbrStatsMsg {
 
     // status
     // 0 - Alive, 1 - Suspect, 2 - Confirm
@@ -64,5 +66,8 @@ message MbrStatsMsg{
 
     uint32 incarnation = 3;
 
-    string address = 4;
+    string udpAddress = 4;
+
+    string tcpAddress = 5;
+
 }

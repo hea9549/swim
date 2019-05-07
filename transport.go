@@ -39,7 +39,7 @@ type Packet struct {
 type UDPTransport interface {
 
 	// WriteTo is a packet-oriented interface that fires off the given
-	// payload to the given address in a connectionless fashion. This should
+	// Payload to the given address in a connectionless fashion. This should
 	// return a time stamp that's as close as possible to when the packet
 	// was transmitted to help make accurate RTT measurements during probes.
 	//

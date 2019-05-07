@@ -103,7 +103,7 @@ func NewSuspicion(confirmer MemberID, config *SuspicionConfig, curNodeNum int, c
 	s.timer = time.AfterFunc(timeout, s.timeoutHandler)
 
 	// Capture the start time right after starting the timer above so
-	// we should always err on the side of a little longer timeout if
+	// we should always Err on the side of a little longer timeout if
 	// there's any preemption that separates this and the step above.
 
 	s.startTime = time.Now()

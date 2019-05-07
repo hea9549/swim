@@ -46,7 +46,7 @@ const (
 	Dead
 )
 
-func (s Status) toInt() int32 {
+func (s Status) Int() int32 {
 	return int32(s)
 }
 
@@ -94,8 +94,11 @@ type Member struct {
 	// Ip address
 	Addr net.IP
 
-	// Port
-	Port uint16
+	// UDPPort
+	UDPPort uint16
+
+	// TCPPort
+	TCPPort uint16
 
 	// Current member status from my point of view
 	Status Status
@@ -119,7 +122,8 @@ type Member struct {
 type MemberMessage struct {
 	ID          string
 	Addr        net.IP
-	Port        uint16
+	UDPPort     uint16
+	TCPPort     uint16
 	Incarnation uint32
 }
 
@@ -128,8 +132,13 @@ type AliveMessage struct {
 }
 
 // Convert member addr and port to string
-func (m *Member) Address() string {
-	return net.JoinHostPort(m.Addr.String(), strconv.Itoa(int(m.Port)))
+func (m *Member) UDPAddress() string {
+	return net.JoinHostPort(m.Addr.String(), strconv.Itoa(int(m.UDPPort)))
+}
+
+// Convert member addr and port to string
+func (m *Member) TCPAddress() string {
+	return net.JoinHostPort(m.Addr.String(), strconv.Itoa(int(m.TCPPort)))
 }
 
 // Get
@@ -227,7 +236,7 @@ func (m *MemberMap) GetMembers() []Member {
 func (m *MemberMap) Suspect(msg SuspectMessage, curProveInterval time.Duration) (bool, error) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	// if member id is empty, return empty memberID err
+	// if member id is empty, return empty memberID Err
 	if msg.ID == "" {
 		return false, ErrEmptyMemberID
 	}
@@ -353,7 +362,8 @@ func createMember(message MemberMessage, status Status) *Member {
 	return &Member{
 		ID:               MemberID{message.ID},
 		Addr:             message.Addr,
-		Port:             message.Port,
+		UDPPort:          message.UDPPort,
+		TCPPort:          message.TCPPort,
 		Status:           status,
 		LastStatusChange: time.Now(),
 		Incarnation:      message.Incarnation,

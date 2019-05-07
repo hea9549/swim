@@ -24,9 +24,9 @@ package swim
 //)
 //
 //func TestSWIM_Join(t *testing.T) {
-//	port, err := GetAvailablePort()
+//	port, Err := GetAvailablePort()
 //
-//	assert.NoError(t, err)
+//	assert.NoError(t, Err)
 //
 //	s1 := New(&Config{
 //		K:             2,
@@ -54,9 +54,9 @@ package swim
 //	portNumber := 5000
 //	for {
 //		strPortNumber := strconv.Itoa(portNumber)
-//		lis, err := net.Listen("tcp", "127.0.0.1:"+strPortNumber)
+//		lis, Err := net.Listen("tcp", "127.0.0.1:"+strPortNumber)
 //
-//		if err == nil {
+//		if Err == nil {
 //			lis.Close()
 //			return portNumber, nil
 //		}

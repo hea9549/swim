@@ -300,16 +300,16 @@ func TestMessageEndpoint_processPacket(t *testing.T) {
 
 // validateMessage should have both Seq value and Payload
 func Test_validateMessage(t *testing.T) {
-	// 1. message w/o payload expect to false
+	// 1. message w/o Payload expect to false
 	msg1 := pb.Message{Id: "seq1"}
 	assert.Equal(t, validateMessage(msg1), false)
 
 	// 2. message w/o seq expect to false
-	msg2 := getAckMessage("", "payload")
+	msg2 := getAckMessage("", "Payload")
 	assert.Equal(t, validateMessage(*msg2), false)
 
-	// 3. message w/ both seq and payload expect to true
-	msg3 := getAckMessage("seq2", "payload")
+	// 3. message w/ both seq and Payload expect to true
+	msg3 := getAckMessage("seq2", "Payload")
 	assert.Equal(t, validateMessage(*msg3), true)
 }
 

@@ -151,7 +151,7 @@ func TestMemberMap_createMember_Internal(t *testing.T) {
 	// given Member Message
 	memberMessage := MemberMessage{
 		ID:          "1",
-		Port:        1111,
+		UDPPort:     1111,
 		Incarnation: 1,
 	}
 

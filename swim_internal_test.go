@@ -467,9 +467,9 @@ func TestSWIM_handleIndirectPing(t *testing.T) {
 	}
 
 	self := &Member{
-		ID:   MemberID{ID: "mi"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: uint16(11146),
+		ID:      MemberID{ID: "mi"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: uint16(11146),
 	}
 	config := &Config{
 		BindAddress: "127.0.0.1",
@@ -558,9 +558,9 @@ func TestSWIM_handleIndirectPing_Target_Timeout(t *testing.T) {
 	}
 
 	self := &Member{
-		ID:   MemberID{ID: "mi"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: uint16(11179),
+		ID:      MemberID{ID: "mi"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: uint16(11179),
 	}
 	config := &Config{
 		BindAddress: "127.0.0.1",
@@ -683,7 +683,7 @@ func TestConvMbrStatsToAliveMsg_Success(t *testing.T) {
 	assert.Equal(t, msg.ID, stats.Id)
 	assert.Equal(t, msg.Incarnation, stats.Incarnation)
 	assert.Equal(t, msg.Addr, net.ParseIP("1.2.3.4"))
-	assert.Equal(t, msg.Port, uint16(5555))
+	assert.Equal(t, msg.UDPPort, uint16(5555))
 	assert.NoError(t, err)
 }
 
@@ -741,7 +741,7 @@ func TestConvMbrStatsToSuspectMsg_Success(t *testing.T) {
 	assert.Equal(t, msg.ID, stats.Id)
 	assert.Equal(t, msg.Incarnation, stats.Incarnation)
 	assert.Equal(t, msg.Addr, net.ParseIP("1.2.3.4"))
-	assert.Equal(t, msg.Port, uint16(5555))
+	assert.Equal(t, msg.UDPPort, uint16(5555))
 	assert.Equal(t, msg.ConfirmerID, "123")
 	assert.NoError(t, err)
 }
@@ -864,7 +864,7 @@ func TestSWIM_indirectPing_When_Response_Success(t *testing.T) {
 		Address: mJAddr,
 		Payload: &pb.Message_Ack{
 			Ack: &pb.Ack{
-				Payload: "ack-payload",
+				Payload: "ack-Payload",
 			},
 		},
 		PiggyBack: &pb.PiggyBack{
@@ -890,19 +890,19 @@ func TestSWIM_indirectPing_When_Response_Success(t *testing.T) {
 	}
 
 	mIMember := &Member{
-		ID:   MemberID{ID: "mi"},
-		Addr: net.ParseIP("9.8.7.6"),
-		Port: uint16(33333),
+		ID:      MemberID{ID: "mi"},
+		Addr:    net.ParseIP("9.8.7.6"),
+		UDPPort: uint16(33333),
 	}
 	mKMember := &Member{
-		ID:   MemberID{ID: "mk"},
-		Addr: net.ParseIP("1.2.3.4"),
-		Port: uint16(11111),
+		ID:      MemberID{ID: "mk"},
+		Addr:    net.ParseIP("1.2.3.4"),
+		UDPPort: uint16(11111),
 	}
 	mJMember := &Member{
-		ID:   MemberID{ID: "mj"},
-		Addr: net.ParseIP("3.4.5.6"),
-		Port: uint16(22222),
+		ID:      MemberID{ID: "mj"},
+		Addr:    net.ParseIP("3.4.5.6"),
+		UDPPort: uint16(22222),
 	}
 
 	indSucc := make(chan pb.Message)
@@ -957,19 +957,19 @@ func TestSWIM_indirectPing_When_Response_Failed(t *testing.T) {
 	}
 
 	mIMember := &Member{
-		ID:   MemberID{ID: "memberID"},
-		Addr: net.ParseIP("9.8.7.6"),
-		Port: uint16(33333),
+		ID:      MemberID{ID: "memberID"},
+		Addr:    net.ParseIP("9.8.7.6"),
+		UDPPort: uint16(33333),
 	}
 	mKMember := &Member{
-		ID:   MemberID{ID: "memberID"},
-		Addr: net.ParseIP("1.2.3.4"),
-		Port: uint16(11111),
+		ID:      MemberID{ID: "memberID"},
+		Addr:    net.ParseIP("1.2.3.4"),
+		UDPPort: uint16(11111),
 	}
 	mJMember := &Member{
-		ID:   MemberID{ID: "targetID"},
-		Addr: net.ParseIP("3.4.5.6"),
-		Port: uint16(22222),
+		ID:      MemberID{ID: "targetID"},
+		Addr:    net.ParseIP("3.4.5.6"),
+		UDPPort: uint16(22222),
 	}
 
 	indSucc := make(chan pb.Message)
@@ -1024,7 +1024,7 @@ func TestSWIM_indirectPing_When_One_Of_Other_Member_Sent_Ack(t *testing.T) {
 			Address: "3.4.5.6:22222",
 			Payload: &pb.Message_Ack{
 				Ack: &pb.Ack{
-					Payload: "ack-payload",
+					Payload: "ack-Payload",
 				},
 			},
 			PiggyBack: &pb.PiggyBack{
@@ -1039,19 +1039,19 @@ func TestSWIM_indirectPing_When_One_Of_Other_Member_Sent_Ack(t *testing.T) {
 	}
 
 	self := &Member{
-		ID:   MemberID{ID: "memberID"},
-		Addr: net.ParseIP("9.8.7.6"),
-		Port: uint16(33333),
+		ID:      MemberID{ID: "memberID"},
+		Addr:    net.ParseIP("9.8.7.6"),
+		UDPPort: uint16(33333),
 	}
 	member := &Member{
-		ID:   MemberID{ID: "memberID"},
-		Addr: net.ParseIP("1.2.3.4"),
-		Port: uint16(11111),
+		ID:      MemberID{ID: "memberID"},
+		Addr:    net.ParseIP("1.2.3.4"),
+		UDPPort: uint16(11111),
 	}
 	target := &Member{
-		ID:   MemberID{ID: "targetID"},
-		Addr: net.ParseIP("3.4.5.6"),
-		Port: uint16(22222),
+		ID:      MemberID{ID: "targetID"},
+		Addr:    net.ParseIP("3.4.5.6"),
+		UDPPort: uint16(22222),
 	}
 
 	indSucc := make(chan pb.Message)
@@ -1093,7 +1093,7 @@ func TestSWIM_ping_When_Response_Success(t *testing.T) {
 		Address: "3.4.5.6:22222",
 		Payload: &pb.Message_Ack{
 			Ack: &pb.Ack{
-				Payload: "ack-payload",
+				Payload: "ack-Payload",
 			},
 		},
 		PiggyBack: &pb.PiggyBack{
@@ -1116,14 +1116,14 @@ func TestSWIM_ping_When_Response_Success(t *testing.T) {
 	}
 
 	self := &Member{
-		ID:   MemberID{ID: "self"},
-		Addr: net.ParseIP("9.8.7.6"),
-		Port: uint16(33333),
+		ID:      MemberID{ID: "self"},
+		Addr:    net.ParseIP("9.8.7.6"),
+		UDPPort: uint16(33333),
 	}
 	member := &Member{
-		ID:   MemberID{ID: "memberID"},
-		Addr: net.ParseIP("1.2.3.4"),
-		Port: uint16(11111),
+		ID:      MemberID{ID: "memberID"},
+		Addr:    net.ParseIP("1.2.3.4"),
+		UDPPort: uint16(11111),
 	}
 
 	end := make(chan struct{})
@@ -1175,14 +1175,14 @@ func TestSWIM_ping_When_Response_Failed(t *testing.T) {
 	}
 
 	self := &Member{
-		ID:   MemberID{ID: "self"},
-		Addr: net.ParseIP("9.8.7.6"),
-		Port: uint16(33333),
+		ID:      MemberID{ID: "self"},
+		Addr:    net.ParseIP("9.8.7.6"),
+		UDPPort: uint16(33333),
 	}
 	member := &Member{
-		ID:   MemberID{ID: "memberID"},
-		Addr: net.ParseIP("1.2.3.4"),
-		Port: uint16(11111),
+		ID:      MemberID{ID: "memberID"},
+		Addr:    net.ParseIP("1.2.3.4"),
+		UDPPort: uint16(11111),
 	}
 
 	end := make(chan struct{})
@@ -1279,16 +1279,16 @@ func TestSWIM_indirectProbe_When_Successfully_Probed(t *testing.T) {
 		mJMessageEndpoint.Send(msg.Address, ack)
 	}
 	mJ := &Member{
-		ID:   MemberID{ID: "mJ"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 11183,
+		ID:      MemberID{ID: "mJ"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 11183,
 	}
 
 	// setup local-node
 	mI := &Member{
-		ID:   MemberID{ID: "mJ"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 11184,
+		ID:      MemberID{ID: "mJ"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 11184,
 	}
 	config := &Config{
 		BindAddress: "127.0.0.1",
@@ -1301,8 +1301,8 @@ func TestSWIM_indirectProbe_When_Successfully_Probed(t *testing.T) {
 		return pb.MbrStatsMsg{}, nil
 	}
 
-	m1 := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), Port: 11181, Status: Alive}
-	m2 := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), Port: 11182, Status: Alive}
+	m1 := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11181, Status: Alive}
+	m2 := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11182, Status: Alive}
 
 	mm := NewMemberMap(&SuspicionConfig{})
 	mm.members[m1.ID] = m1
@@ -1400,9 +1400,9 @@ func TestSWIM_indirectProbe_When_All_Sent_Nack_Message(t *testing.T) {
 		// m_j send nothing
 	}
 	mJ := &Member{
-		ID:   MemberID{ID: "mJ"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 11393,
+		ID:      MemberID{ID: "mJ"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 11393,
 	}
 
 	// setup local-node
@@ -1419,17 +1419,17 @@ func TestSWIM_indirectProbe_When_All_Sent_Nack_Message(t *testing.T) {
 		return pb.MbrStatsMsg{}, nil
 	}
 
-	m1 := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), Port: 11391, Status: Alive}
-	m2 := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), Port: 11392, Status: Alive}
+	m1 := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11391, Status: Alive}
+	m2 := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11392, Status: Alive}
 
 	mm := NewMemberMap(&SuspicionConfig{})
 	mm.members[m1.ID] = m1
 	mm.members[m2.ID] = m2
 
 	mI := &Member{
-		ID:   MemberID{ID: "mIAA"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 11394,
+		ID:      MemberID{ID: "mIAA"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 11394,
 	}
 
 	swim := &SWIM{}
@@ -1534,9 +1534,9 @@ func TestSWIM_indirectProbe_When_Some_Member_Sent_Nack_Message(t *testing.T) {
 		i++
 	}
 	mJ := &Member{
-		ID:   MemberID{ID: "mJ"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 11253,
+		ID:      MemberID{ID: "mJ"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 11253,
 	}
 
 	// setup local-node
@@ -1552,17 +1552,17 @@ func TestSWIM_indirectProbe_When_Some_Member_Sent_Nack_Message(t *testing.T) {
 		return pb.MbrStatsMsg{}, nil
 	}
 
-	m1 := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), Port: 11251, Status: Alive}
-	m2 := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), Port: 11252, Status: Alive}
+	m1 := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11251, Status: Alive}
+	m2 := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11252, Status: Alive}
 
 	mm := NewMemberMap(&SuspicionConfig{})
 	mm.members[m1.ID] = m1
 	mm.members[m2.ID] = m2
 
 	mI := &Member{
-		ID:   MemberID{ID: "mI"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 11254,
+		ID:      MemberID{ID: "mI"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 11254,
 	}
 
 	swim := &SWIM{}
@@ -1612,7 +1612,7 @@ func TestSWIM_probe_When_Member_Is_Dead(t *testing.T) {
 
 func TestSWIM_probe_When_Target_Respond_To_Ping(t *testing.T) {
 	// setup M_J member
-	mJMember := Member{ID: MemberID{ID: "mj"}, Addr: net.ParseIP("127.0.0.1"), Port: 11161, Status: Alive}
+	mJMember := Member{ID: MemberID{ID: "mj"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11161, Status: Alive}
 	mJMessageHandler := &MockMessageHandler{}
 
 	mJMessageEndpoint := createMessageEndpoint(t, mJMessageHandler, time.Second, 11161)
@@ -1651,9 +1651,9 @@ func TestSWIM_probe_When_Target_Respond_To_Ping(t *testing.T) {
 	})
 
 	mI := &Member{
-		ID:   MemberID{ID: "mI"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 11162,
+		ID:      MemberID{ID: "mI"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 11162,
 	}
 
 	awareness := NewAwareness(8)
@@ -1747,13 +1747,13 @@ func TestSWIM_probe_When_Target_Respond_To_Indirect_Ping(t *testing.T) {
 	}
 
 	mI := &Member{
-		ID:   MemberID{ID: "mI"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 13162,
+		ID:      MemberID{ID: "mI"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 13162,
 	}
 
-	m1Member := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), Port: 13163, Status: Alive}
-	m2Member := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), Port: 13164, Status: Alive}
+	m1Member := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 13163, Status: Alive}
+	m2Member := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 13164, Status: Alive}
 
 	mm := NewMemberMap(&SuspicionConfig{
 		K:        2,
@@ -1846,7 +1846,7 @@ func TestSWIM_probe_When_Target_Respond_To_Indirect_Ping(t *testing.T) {
 		mk2MessageEndpoint.Shutdown()
 	}()
 
-	mJMember := Member{ID: MemberID{ID: "mj"}, Addr: net.ParseIP("127.0.0.1"), Port: 13161, Status: Alive}
+	mJMember := Member{ID: MemberID{ID: "mj"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 13161, Status: Alive}
 	swim.probe(mJMember, 5*time.Second)
 
 	assert.Equal(t, swim.awareness.score, 1)
@@ -1898,13 +1898,13 @@ func TestSWIM_probe_When_Target_Not_Respond_To_Indirect_Ping(t *testing.T) {
 	}
 
 	mI := &Member{
-		ID:   MemberID{ID: "mI"},
-		Addr: net.ParseIP("127.0.0.1"),
-		Port: 11162,
+		ID:      MemberID{ID: "mI"},
+		Addr:    net.ParseIP("127.0.0.1"),
+		UDPPort: 11162,
 	}
 
-	m1Member := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), Port: 11163, Status: Alive}
-	m2Member := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), Port: 11164, Status: Alive}
+	m1Member := &Member{ID: MemberID{ID: "m1"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11163, Status: Alive}
+	m2Member := &Member{ID: MemberID{ID: "m2"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11164, Status: Alive}
 
 	mm := NewMemberMap(&SuspicionConfig{})
 	mm.members[m1Member.ID] = m1Member
@@ -2000,7 +2000,7 @@ func TestSWIM_probe_When_Target_Not_Respond_To_Indirect_Ping(t *testing.T) {
 		mk2MessageEndpoint.Shutdown()
 	}()
 
-	mJMember := Member{ID: MemberID{ID: "mj"}, Addr: net.ParseIP("127.0.0.1"), Port: 11161, Status: Alive}
+	mJMember := Member{ID: MemberID{ID: "mj"}, Addr: net.ParseIP("127.0.0.1"), UDPPort: 11161, Status: Alive}
 	swim.probe(mJMember, 5*time.Second)
 
 	assert.Equal(t, swim.awareness.score, 3)

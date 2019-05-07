@@ -18,7 +18,7 @@ package swim
 
 import (
 	"errors"
-		"sync"
+	"sync"
 	"time"
 
 	"github.com/DE-labtory/iLogger"
@@ -202,7 +202,7 @@ func validateMessage(msg pb.Message) bool {
 	}
 
 	if msg.Payload == nil {
-		iLogger.Info(nil, "message payload value empty")
+		iLogger.Info(nil, "message Payload value empty")
 		return false
 	}
 
@@ -290,4 +290,243 @@ func (m *DefaultMessageEndpoint) Shutdown() {
 
 	// then close message endpoint
 	m.quit <- struct{}{}
+}
+
+// EvaluatorMessageEndpoint
+type EvaluatorMessageEndpoint struct {
+	config               MessageEndpointConfig
+	transport            UDPTransport
+	messageHandler       MessageHandler
+	resHandler           *responseHandler
+	packetInCounterLock  sync.Mutex
+	packetInCounter      int
+	packetOutCounterLock sync.Mutex
+	packetOutCounter     int
+	quit                 chan struct{}
+}
+
+func NewEvaluatorMessageEndpoint(config MessageEndpointConfig, transport UDPTransport, messageHandler MessageHandler) (*EvaluatorMessageEndpoint, error) {
+	if config.CallbackCollectInterval == time.Duration(0) {
+		return nil, ErrCallbackCollectIntervalNotSpecified
+	}
+
+	return &EvaluatorMessageEndpoint{
+		config:               config,
+		transport:            transport,
+		messageHandler:       messageHandler,
+		resHandler:           newResponseHandler(config.CallbackCollectInterval),
+		packetInCounterLock:  sync.Mutex{},
+		packetInCounter:      0,
+		packetOutCounterLock: sync.Mutex{},
+		packetOutCounter:     0,
+		quit:                 make(chan struct{}),
+	}, nil
+}
+
+// Listen is a log running goroutine that pulls packet from the
+// transport and pass it for processing
+func (m *EvaluatorMessageEndpoint) Listen() {
+	for {
+		select {
+		case packet := <-m.transport.PacketCh():
+			// validate packet then convert it to message
+			msg, err := m.processPacket(*packet)
+			if err != nil {
+				iLogger.Error(nil, err.Error())
+			}
+			go func() {
+				m.packetInCounterLock.Lock()
+				defer m.packetInCounterLock.Unlock()
+				m.addInPacketCounter()
+			}()
+
+			// before message that come from other handle by MessageHandler
+			// check whether this message is sent-back message from other member
+			// this is determined by message's Seq property which work as message id
+
+			if m.resHandler.hasCallback(msg.Id) {
+				go m.resHandler.handle(msg)
+			} else {
+				go m.handleMessage(msg)
+			}
+
+		case <-m.quit:
+			return
+		}
+	}
+}
+
+// ProcessPacket process given packet, this procedure may include
+// decrypting data and converting it to message
+func (m *EvaluatorMessageEndpoint) processPacket(packet Packet) (pb.Message, error) {
+	msg := &pb.Message{}
+	if m.config.EncryptionEnabled {
+		// TODO: decrypt packet
+	}
+
+	if err := proto.Unmarshal(packet.Buf, msg); err != nil {
+		return pb.Message{}, err
+	}
+
+	return *msg, nil
+}
+
+// with given message handleMessage determine which logic should be executed
+// based on the message type. Additionally handleMessage can call MemberDelegater
+// to update member status and encrypt messages
+func (m *EvaluatorMessageEndpoint) handleMessage(msg pb.Message) error {
+	// validate message
+	if !validateMessage(msg) {
+		return ErrInvalidMessage
+	}
+
+	// call delegate func to update members states
+	m.messageHandler.handle(msg)
+	return nil
+
+}
+
+// SyncSend synchronously send message to member of addr, waits until response come back,
+// whether it is timeout or send failed, SyncSend can be used in the case of pinging to other members.
+// if @timeout is provided then set send timeout to given parameters, if not then calculate
+// timeout based on the its awareness
+func (m *EvaluatorMessageEndpoint) SyncSend(addr string, msg pb.Message) (pb.Message, error) {
+	onSucc := make(chan pb.Message)
+	defer close(onSucc)
+
+	d, err := proto.Marshal(&msg)
+	if err != nil {
+		return pb.Message{}, err
+	}
+
+	// register callback function, this callback function is called when
+	// member with @addr sent back us packet
+	m.resHandler.addCallback(msg.Id, callback{
+		fn: func(msg pb.Message) {
+			onSucc <- msg
+		},
+		created: time.Now(),
+	})
+
+	// send the message
+	_, err = m.transport.WriteTo(d, addr)
+	if err != nil {
+		iLogger.Error(nil, err.Error())
+		return pb.Message{}, err
+	}
+
+	go func() {
+		m.packetOutCounterLock.Lock()
+		defer m.packetOutCounterLock.Unlock()
+		m.addOutPacketCounter()
+	}()
+
+	// start timer
+	T := time.NewTimer(m.config.SendTimeout)
+
+	select {
+	case msg := <-onSucc:
+		return msg, nil
+	case <-T.C:
+		return pb.Message{}, ErrSendTimeout
+	}
+
+	return pb.Message{}, ErrUnreachable
+}
+
+// Send asynchronously send message to member of addr, don't wait until response come back,
+// after response came back, callback function executed, Send can be used in the case of
+// gossip message to other members
+func (m *EvaluatorMessageEndpoint) Send(addr string, msg pb.Message) error {
+	d, err := proto.Marshal(&msg)
+	if err != nil {
+		return err
+	}
+
+	// send the message
+	_, err = m.transport.WriteTo(d, addr)
+	if err != nil {
+		iLogger.Info(nil, err.Error())
+		return err
+	}
+
+	go func() {
+		m.packetOutCounterLock.Lock()
+		defer m.packetOutCounterLock.Unlock()
+		m.addOutPacketCounter()
+	}()
+
+	return nil
+}
+
+func (m *EvaluatorMessageEndpoint) Shutdown() {
+	// close transport first
+	m.transport.Shutdown()
+
+	// then close message endpoint
+	m.quit <- struct{}{}
+}
+
+func (m *EvaluatorMessageEndpoint) addInPacketCounter() {
+	m.packetInCounterLock.Lock()
+	defer m.packetInCounterLock.Unlock()
+
+	m.packetInCounter++
+}
+
+func (m *EvaluatorMessageEndpoint) ResetInPacketCounter() {
+	m.packetInCounterLock.Lock()
+	defer m.packetInCounterLock.Unlock()
+
+	m.packetInCounter = 0
+}
+
+func (m *EvaluatorMessageEndpoint) GetInPacketCounter() int {
+	m.packetInCounterLock.Lock()
+	defer m.packetInCounterLock.Unlock()
+
+	return m.packetInCounter
+
+}
+
+func (m *EvaluatorMessageEndpoint) PopInPacketCounter() int {
+	m.packetInCounterLock.Lock()
+	defer m.packetInCounterLock.Unlock()
+	d := m.packetInCounter
+	m.packetInCounter =0
+	return d
+
+}
+
+
+
+func (m *EvaluatorMessageEndpoint) addOutPacketCounter() {
+	m.packetOutCounterLock.Lock()
+	defer m.packetOutCounterLock.Unlock()
+
+	m.packetOutCounter++
+}
+
+func (m *EvaluatorMessageEndpoint) ResetOutPacketCounter() {
+	m.packetOutCounterLock.Lock()
+	defer m.packetOutCounterLock.Unlock()
+
+	m.packetOutCounter = 0
+}
+
+func (m *EvaluatorMessageEndpoint) GetOutPacketCounter() int {
+	m.packetOutCounterLock.Lock()
+	defer m.packetOutCounterLock.Unlock()
+
+	return m.packetOutCounter
+
+}
+
+func (m *EvaluatorMessageEndpoint) PopOutPacketCounter() int {
+	m.packetOutCounterLock.Lock()
+	defer m.packetOutCounterLock.Unlock()
+	d := m.packetOutCounter
+	m.packetOutCounter =0
+	return d
+
 }

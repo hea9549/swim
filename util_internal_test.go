@@ -38,8 +38,8 @@ func TestTaskRunner_Start_Successfully_Response(t *testing.T) {
 
 	response := runner.Start()
 
-	payload1 := response.payload
-	err1 := response.err
+	payload1 := response.Payload
+	err1 := response.Err
 
 	assert.NoError(t, err1)
 	assert.Equal(t, reflect.TypeOf(payload1), reflect.TypeOf(mockData{}))
@@ -61,8 +61,8 @@ func TestTaskRunner_Start_Failed_With_Error(t *testing.T) {
 
 	response := runner.Start()
 
-	payload1 := response.payload
-	err1 := response.err
+	payload1 := response.Payload
+	err1 := response.Err
 
 	assert.Error(t, err1, errTaskFailed)
 	assert.Nil(t, payload1)
@@ -84,8 +84,8 @@ func TestTaskRunner_Start_Cancellation(t *testing.T) {
 
 	go func() {
 		resp := runner.Start()
-		assert.Nil(t, resp.payload)
-		assert.Nil(t, resp.err)
+		assert.Nil(t, resp.Payload)
+		assert.Nil(t, resp.Err)
 
 		wg.Done()
 	}()
