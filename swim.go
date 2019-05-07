@@ -172,7 +172,7 @@ func (s *SWIM) Join(peerAddresses []string) error {
 		if err != nil {
 			iLogger.Error(nil, "error while join : "+err.Error())
 		}
-		iLogger.Info(nil, "add new member : "+address)
+
 	}
 
 	return nil
@@ -861,8 +861,8 @@ func (s *SWIM) handleMembership(msg pb.Message) {
 
 }
 
-func (s *SWIM) GetMyInfo() Member {
-	return *s.member
+func (s *SWIM) GetMyInfo() *Member {
+	return s.member
 }
 
 func createPingMessage(id, src string, mbrStatsMsg *pb.MbrStatsMsg) pb.Message {

@@ -8,7 +8,7 @@ import (
 
 
 func NewSwimForEvaluate(config *Config, suspicionConfig *SuspicionConfig, messageEndpointConfig MessageEndpointConfig,
-	tcpMessageEndpointConfig TCPMessageEndpointConfig, member *Member) (*SWIM, *MemberMap) {
+	tcpMessageEndpointConfig TCPMessageEndpointConfig, member *Member) (*SWIM, *EvaluatorMessageEndpoint) {
 	if config.T < config.AckTimeOut {
 		iLogger.Panic(nil, "T time must be longer than ack time-out")
 	}
@@ -67,5 +67,5 @@ func NewSwimForEvaluate(config *Config, suspicionConfig *SuspicionConfig, messag
 	tcpMessageEndpoint := NewTCPMessageEndpoint(tcpMessageEndpointConfig, &swim)
 	swim.tcpMessageEndpoint = tcpMessageEndpoint
 
-	return &swim, swim.memberMap
+	return &swim, messageEndpoint
 }

@@ -236,7 +236,7 @@ func (t *TCPMessageEndpoint) startReceiver(mbrId MemberID, conn net.Conn) {
 		_, err := conn.Read(bufferDataSize)
 		if err != nil {
 			iLogger.Error(&iLogger.Fields{"from": t.config.MyId, "to": mbrId}, "[TCPMessageEndpoint] error in TCP receiver, read data size")
-
+			iLogger.Error(nil,"ERR : "+err.Error())
 			conn.Close()
 			t.removeTCPInfo(mbrId)
 			return

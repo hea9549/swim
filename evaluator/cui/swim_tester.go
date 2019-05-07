@@ -11,22 +11,35 @@ import (
 	"github.com/gizak/termui/v3/widgets"
 	"strconv"
 	"strings"
-	"github.com/DE-labtory/swim/evaluator"
+	"sort"
+	"sync"
 )
 
 type Evaluator struct {
 	ExactMember []swim.Member
-	Swimmer     []*swim.SWIM
+	Swimmer     map[string]*swim.SWIM
+	MsgEndpoint map[string]*swim.EvaluatorMessageEndpoint
 	lastID      int
+	cmdLog      *widgets.List
+	renderLock  sync.Mutex
 }
 
 func main() {
+
+	ev := &Evaluator{
+		ExactMember: make([]swim.Member, 0),
+		Swimmer:     make(map[string]*swim.SWIM),
+		MsgEndpoint: make(map[string]*swim.EvaluatorMessageEndpoint),
+		lastID:      0,
+		cmdLog:      widgets.NewList(),
+		renderLock:  sync.Mutex{},
+	}
 
 	if err := ui.Init(); err != nil {
 		iLogger.Fatalf(nil, "failed to initialize termui: %v", err)
 	}
 	defer ui.Close()
-	sparkData := []float64{1, 2, 3, 4, 5, 6, 7, 8,}
+	sparkData := []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	sl1 := widgets.NewSparkline()
 	sl1.Title = "In"
 	sl1.Data = sparkData
@@ -34,7 +47,7 @@ func main() {
 
 	sl2 := widgets.NewSparkline()
 	sl2.Title = "Out"
-	sl2.Data = sparkData[5:]
+	sl2.Data = sparkData
 	sl2.LineColor = ui.ColorMagenta
 
 	slg1 := widgets.NewSparklineGroup(sl1, sl2)
@@ -66,11 +79,10 @@ func main() {
 	infoExplain.Border = false
 	infoExplain.Text = "G:100 B:~95 C:~90 Y:~85 M:~80 R:80~ W:Dead"
 
-	cmdLog := widgets.NewList()
-	cmdLog.Rows = listData[:3]
-	cmdLog.Title = "command log"
-	cmdLog.TitleStyle.Fg = ui.ColorCyan
-	cmdLog.SetRect(0, 16, 82, 23)
+	ev.cmdLog.Title = "command log"
+	ev.cmdLog.TitleStyle.Fg = ui.ColorCyan
+	ev.cmdLog.Rows = []string{"", "", "", "", ""}
+	ev.cmdLog.SetRect(0, 16, 82, 23)
 
 	tb := cui.NewTextBox()
 	tb.SetRect(0, 23, 82, 26)
@@ -87,7 +99,7 @@ func main() {
 
 	g2 := widgets.NewGauge()
 	g2.Title = "Avg Node Sync Rate"
-	g2.Percent = 50
+	g2.Percent = 10
 	g2.SetRect(82, 3, 110, 6)
 	g2.BarColor = ui.ColorRed
 	g2.BorderStyle.Fg = ui.ColorWhite
@@ -107,21 +119,35 @@ func main() {
 	recentData.Rows = listData
 	recentData.SetRect(82, 9, 110, 26)
 
-	ui.Render(nodeInfo, tb, slg1, l, infoExplain, cmdLog, g, g2, g3, recentData)
+	ui.Render(nodeInfo, tb, slg1, l, infoExplain, ev.cmdLog, g, g2, g3, recentData)
 	uiEvents := ui.PollEvents()
 
-	ev := &Evaluator{
-		ExactMember: make([]swim.Member,0),
-		Swimmer:     make([]*swim.SWIM,0),
-		lastID:      0,
-	}
-	ev.processCommand("create 2")
 	go func() {
-		for{
-			time.Sleep(300*time.Millisecond)
-			str := processMemberStatus(ev.ExactMember,ev.Swimmer)
+		tick := 0
+		for {
+			time.Sleep(50 * time.Millisecond)
+			str, _ := processMemberStatus(ev.ExactMember, ev.Swimmer)
 			nodeInfo.Text = str
-			ui.Render(nodeInfo)
+			//g2.Percent = int(avgProb)
+			ev.Render(nodeInfo)
+			//ui.Render(g2)
+			tick++
+			if tick%40 == 0 {
+				nodeInfo.Text = " "
+				ev.Render(nodeInfo)
+			}
+
+		}
+	}()
+
+	go func() {
+		for {
+			time.Sleep(500 * time.Millisecond)
+			in, out := processInOutPacketSparkle(ev.MsgEndpoint)
+			slg1.Sparklines[0].Data = append(slg1.Sparklines[0].Data[1:], in)
+			slg1.Sparklines[1].Data = append(slg1.Sparklines[1].Data[1:], out)
+			ev.Render(slg1)
+
 		}
 	}()
 
@@ -132,7 +158,7 @@ func main() {
 			switch e.ID {
 			case "<C-c>":
 				return
-			case "<Backspace>","<C-<Backspace>>":
+			case "<Backspace>", "<C-<Backspace>>":
 				tb.Backspace()
 			case "<Left>":
 				tb.MoveCursorLeft()
@@ -141,14 +167,15 @@ func main() {
 			case "<Space>":
 				tb.InsertText(" ")
 			case "<Enter>":
-				ev.processCommand(tb.GetRawText())
+				log := ev.processCommand(tb.GetRawText())
+				ev.AppendLog(log)
 				tb.ClearText()
 			default:
 				if cui.ContainsString(cui.PRINTABLE_KEYS, e.ID) {
 					tb.InsertText(e.ID)
 				}
 			}
-			ui.Render(tb)
+			ev.Render(tb)
 		case ui.ResizeEvent:
 
 		}
@@ -164,24 +191,64 @@ func (e *Evaluator) processCommand(cmd string) string {
 	switch cmdDomain {
 	case "create":
 		if len(cmdList) < 2 {
-			return "you have to input create node num"
+			return "you have to input create node num. [ex : create 5]"
 		}
 
 		num, err := strconv.Atoi(cmdList[1])
 		if err != nil {
 			return "you have to input create node number, not " + cmdList[1]
 		}
-		for i:=0;i<num;i++{
-			portList := evaluator.GetAvailablePortList(40000, 2)
+		for i := 0; i < num; i++ {
+
 			e.lastID++
+			tcpPort := 20000 + e.lastID*2
+			udpPort := 20000 + e.lastID*2 + 1
 			id := strconv.Itoa(e.lastID)
-			s := SetupSwim("127.0.0.1", portList[0], portList[1], id)
-			e.Swimmer = append(e.Swimmer, s)
-			e.ExactMember = append(e.ExactMember, s.GetMyInfo())
+
+			s, msgEndpoint := SetupSwim("127.0.0.1", tcpPort, udpPort, id)
+			e.Swimmer[id] = s
+			e.MsgEndpoint[id] = msgEndpoint
+			e.ExactMember = append(e.ExactMember, *s.GetMyInfo())
 			go s.Start()
+			time.Sleep(50 * time.Millisecond)
 		}
-		return "successfully create nodes "+strconv.Itoa(num)
+		return "successfully create nodes " + strconv.Itoa(num)
 	case "connect":
+		if len(cmdList) < 3 {
+			return "you have to input src, dst [ex : connect all 2, connect 2 6, connect {src} {dst}]"
+		}
+
+		src := cmdList[1]
+		dst := cmdList[2]
+
+		if src == "all" {
+			if dst == "all" {
+				return "all to all connect is not available now"
+			}
+			if dstSwimmer, ok := e.Swimmer[dst]; ok {
+				dstInfo := dstSwimmer.GetMyInfo()
+				for _, srcSwimmer := range e.Swimmer {
+					if srcSwimmer.GetMyInfo().ID == dstInfo.ID {
+						continue
+					}
+					srcSwimmer.Join([]string{dstInfo.TCPAddress()})
+				}
+			} else {
+				return "input swim dst id is invalid. input : " + dst
+			}
+			return "successfully join " + src + " to " + dst
+		}
+		if srcSwimmer, ok := e.Swimmer[src]; ok {
+			if dstSwimmer, ok := e.Swimmer[dst]; ok {
+				dstInfo := dstSwimmer.GetMyInfo()
+				srcSwimmer.Join([]string{dstInfo.TCPAddress()})
+				return "successfully join " + src + " to " + dst
+			} else {
+				return "input swim dst id is invalid. input : " + dst
+			}
+		} else {
+			return "input swim src id is invalid. input : " + src
+		}
 	default:
 		return "invalid cmd : " + cmdDomain
 	}
@@ -193,7 +260,7 @@ func before2() {
 
 	swimObjList := make([]*swim.SWIM, 0)
 	for i := 0; i < 500; i++ {
-		swimObj := SetupSwim("127.0.0.1", 45000+i, 55000+i, strconv.Itoa(i))
+		swimObj, _ := SetupSwim("127.0.0.1", 45000+i, 55000+i, strconv.Itoa(i))
 		go swimObj.Start()
 		swimObjList = append(swimObjList, swimObj)
 		time.Sleep(10 * time.Millisecond)
@@ -229,7 +296,7 @@ func before2() {
 	}
 }
 
-func SetupSwim(ip string, udpPort int, tcpPort int, id string) *swim.SWIM {
+func SetupSwim(ip string, udpPort int, tcpPort int, id string) (*swim.SWIM, *swim.EvaluatorMessageEndpoint) {
 	swimConfig := swim.Config{
 		MaxlocalCount: 5,
 		MaxNsaCounter: 5,
@@ -257,7 +324,7 @@ func SetupSwim(ip string, udpPort int, tcpPort int, id string) *swim.SWIM {
 		Port:              tcpPort,
 		MyId:              swim.MemberID{ID: id},
 	}
-	swimObj := swim.New(&swimConfig, &suspicionConfig, messageEndpointConfig, tcpEndpointconfig, &swim.Member{
+	swimObj, msgEndpoint := swim.NewSwimForEvaluate(&swimConfig, &suspicionConfig, messageEndpointConfig, tcpEndpointconfig, &swim.Member{
 		ID:               swim.MemberID{ID: id},
 		Addr:             net.ParseIP(ip),
 		UDPPort:          uint16(udpPort),
@@ -267,13 +334,10 @@ func SetupSwim(ip string, udpPort int, tcpPort int, id string) *swim.SWIM {
 		Incarnation:      0,
 	})
 
-	return swimObj
+	return swimObj, msgEndpoint
 }
 
-func processInOutPacketSparkle(inSparkle *widgets.Sparkline, outSparkle *widgets.Sparkline,
-	sparkleLineGroup *widgets.SparklineGroup, swimmers []swim.EvaluatorMessageEndpoint) {
-	inSparkle.Data = inSparkle.Data[1:]
-	outSparkle.Data = inSparkle.Data[1:]
+func processInOutPacketSparkle(swimmers map[string]*swim.EvaluatorMessageEndpoint) (float64, float64) {
 
 	var totalInPacket, totalOutPacket int
 
@@ -285,30 +349,33 @@ func processInOutPacketSparkle(inSparkle *widgets.Sparkline, outSparkle *widgets
 	avgInPacket := float64(totalInPacket) / float64(len(swimmers))
 	avgOutPacket := float64(totalOutPacket) / float64(len(swimmers))
 
-	inSparkle.Data = append(inSparkle.Data, avgInPacket)
-	outSparkle.Data = append(inSparkle.Data, avgOutPacket)
-
-	ui.Render(sparkleLineGroup)
+	return avgInPacket, avgOutPacket
 }
+
 type IdProbStruct struct {
 	id    string
 	prob  float64
 	isRun bool
 }
-func processMemberStatus(exactMembers []swim.Member, swimmers []*swim.SWIM) string {
 
+func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.SWIM) (string, float64) {
 
 	dataList := make([]IdProbStruct, 0)
+	totalProb := float64(0)
 	for _, swimmer := range swimmers {
 		memberMap := swimmer.GetMemberMap()
 		prob := compareMemberList(exactMembers, memberMap.GetMembers())
+		totalProb += prob
 		dataList = append(dataList, IdProbStruct{
 			id:    swimmer.GetMyInfo().ID.ID,
 			prob:  prob,
 			isRun: swimmer.IsRun(),
 		})
 	}
-
+	avgProb := totalProb / float64(len(swimmers))
+	sort.Slice(dataList[:], func(i, j int) bool {
+		return dataList[i].id < dataList[j].id
+	})
 	visualizeString := ""
 	counter := 0
 	for _, oneData := range dataList {
@@ -334,6 +401,8 @@ func processMemberStatus(exactMembers []swim.Member, swimmers []*swim.SWIM) stri
 		case oneData.prob < float64(80):
 			visualizeString += fmt.Sprintf("%4sR", oneData.id)
 			break
+		default:
+			
 
 		}
 		counter++
@@ -343,7 +412,7 @@ func processMemberStatus(exactMembers []swim.Member, swimmers []*swim.SWIM) stri
 		}
 
 	}
-	return visualizeString
+	return visualizeString, avgProb
 }
 
 func compareMemberList(expected []swim.Member, data []swim.Member) float64 {
@@ -361,6 +430,7 @@ func compareMemberList(expected []swim.Member, data []swim.Member) float64 {
 			miss++
 		}
 	}
+	miss--
 	probability := 1 - float64(miss)/float64(correctNum)
 	if probability < 0 {
 		probability = 0
@@ -376,4 +446,15 @@ func isInSameDataMember(checkMember swim.Member, memberList []swim.Member) bool 
 	}
 	return false
 
+}
+
+func (e *Evaluator) AppendLog(log string) {
+	e.cmdLog.Rows = append(e.cmdLog.Rows[1:], log)
+	e.Render(e.cmdLog)
+}
+
+func (e *Evaluator) Render(item ui.Drawable) {
+	e.renderLock.Lock()
+	defer e.renderLock.Unlock()
+	ui.Render(item)
 }

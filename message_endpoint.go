@@ -335,8 +335,6 @@ func (m *EvaluatorMessageEndpoint) Listen() {
 				iLogger.Error(nil, err.Error())
 			}
 			go func() {
-				m.packetInCounterLock.Lock()
-				defer m.packetInCounterLock.Unlock()
 				m.addInPacketCounter()
 			}()
 
@@ -416,8 +414,6 @@ func (m *EvaluatorMessageEndpoint) SyncSend(addr string, msg pb.Message) (pb.Mes
 	}
 
 	go func() {
-		m.packetOutCounterLock.Lock()
-		defer m.packetOutCounterLock.Unlock()
 		m.addOutPacketCounter()
 	}()
 
@@ -451,8 +447,6 @@ func (m *EvaluatorMessageEndpoint) Send(addr string, msg pb.Message) error {
 	}
 
 	go func() {
-		m.packetOutCounterLock.Lock()
-		defer m.packetOutCounterLock.Unlock()
 		m.addOutPacketCounter()
 	}()
 
@@ -495,7 +489,6 @@ func (m *EvaluatorMessageEndpoint) PopInPacketCounter() int {
 	d := m.packetInCounter
 	m.packetInCounter =0
 	return d
-
 }
 
 
