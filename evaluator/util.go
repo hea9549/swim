@@ -28,7 +28,7 @@ func GetAvailablePortList(startPort int, num int) []int {
 		lis, Err := net.Listen("tcp", "127.0.0.1:"+strPortNumber)
 
 		if Err == nil {
-			portList := append(portList, portNumber)
+			portList = append(portList, portNumber)
 			lis.Close()
 			if len(portList) == num {
 				return portList

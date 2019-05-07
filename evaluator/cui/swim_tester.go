@@ -109,6 +109,22 @@ func main() {
 
 	ui.Render(nodeInfo, tb, slg1, l, infoExplain, cmdLog, g, g2, g3, recentData)
 	uiEvents := ui.PollEvents()
+
+	ev := &Evaluator{
+		ExactMember: make([]swim.Member,0),
+		Swimmer:     make([]*swim.SWIM,0),
+		lastID:      0,
+	}
+	ev.processCommand("create 2")
+	go func() {
+		for{
+			time.Sleep(300*time.Millisecond)
+			str := processMemberStatus(ev.ExactMember,ev.Swimmer)
+			nodeInfo.Text = str
+			ui.Render(nodeInfo)
+		}
+	}()
+
 	for {
 		e := <-uiEvents
 		switch e.Type {
@@ -116,7 +132,7 @@ func main() {
 			switch e.ID {
 			case "<C-c>":
 				return
-			case "<Backspace>":
+			case "<Backspace>","<C-<Backspace>>":
 				tb.Backspace()
 			case "<Left>":
 				tb.MoveCursorLeft()
@@ -125,7 +141,7 @@ func main() {
 			case "<Space>":
 				tb.InsertText(" ")
 			case "<Enter>":
-				processCommand(tb.GetRawText())
+				ev.processCommand(tb.GetRawText())
 				tb.ClearText()
 			default:
 				if cui.ContainsString(cui.PRINTABLE_KEYS, e.ID) {
@@ -274,17 +290,18 @@ func processInOutPacketSparkle(inSparkle *widgets.Sparkline, outSparkle *widgets
 
 	ui.Render(sparkleLineGroup)
 }
+type IdProbStruct struct {
+	id    string
+	prob  float64
+	isRun bool
+}
+func processMemberStatus(exactMembers []swim.Member, swimmers []*swim.SWIM) string {
 
-func processMemberStatus(nodeSt cui.NodeStatParagraph, exactMembers []swim.Member, swimmers []swim.SWIM) string {
-	type IdProbStruct struct {
-		id    string
-		prob  float64
-		isRun bool
-	}
 
 	dataList := make([]IdProbStruct, 0)
 	for _, swimmer := range swimmers {
-		prob := compareMemberList(exactMembers, swimmer.GetMemberMap().GetMembers())
+		memberMap := swimmer.GetMemberMap()
+		prob := compareMemberList(exactMembers, memberMap.GetMembers())
 		dataList = append(dataList, IdProbStruct{
 			id:    swimmer.GetMyInfo().ID.ID,
 			prob:  prob,
