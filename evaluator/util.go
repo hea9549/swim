@@ -5,7 +5,7 @@ import (
 	"net"
 )
 
-func GetAvailablePort(startPort int) (int, error) {
+func GetAvailablePort(startPort int) int {
 	portNumber := startPort
 	for {
 		strPortNumber := strconv.Itoa(portNumber)
@@ -13,7 +13,7 @@ func GetAvailablePort(startPort int) (int, error) {
 
 		if Err == nil {
 			lis.Close()
-			return portNumber, nil
+			return portNumber
 		}
 
 		portNumber++

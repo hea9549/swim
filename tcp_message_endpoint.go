@@ -66,39 +66,44 @@ func (t *TCPMessageEndpoint) Listen() {
 			//todo is enough ?
 			return
 		}
-		conn, err := server.Accept()
-		if err != nil {
-			conn.Close()
-			iLogger.Error(nil, "[TCPMessageEndpoint] error in accept")
-			continue
-		}
+		func (){
+			conn, err := server.Accept()
+			t.processLock.Lock()
+			defer t.processLock.Unlock()
+			if err != nil {
+				conn.Close()
+				iLogger.Error(nil, "[TCPMessageEndpoint] error in accept")
+				return
+			}
 
-		idBuf := make([]byte, 1024)
-		readN, err := conn.Read(idBuf)
-		if err != nil {
-			iLogger.Error(nil, "[TCPMessageEndpoint] error in read ID in listen")
-			conn.Close()
-			continue
-		}
-		recvStr := string(idBuf[:readN])
-		if strings.Contains(recvStr, endOfIdChar) != true {
-			iLogger.Error(nil, "[TCPMessageEndpoint] error in recv Id in listen")
-			conn.Close()
-			continue
-		}
+			idBuf := make([]byte, 1024)
+			readN, err := conn.Read(idBuf)
+			if err != nil {
+				iLogger.Error(nil, "[TCPMessageEndpoint] error in read ID in listen")
+				conn.Close()
+				return
+			}
+			recvStr := string(idBuf[:readN])
+			if strings.Contains(recvStr, endOfIdChar) != true {
+				iLogger.Error(nil, "[TCPMessageEndpoint] error in recv Id in listen")
+				conn.Close()
+				return
+			}
 
-		_, err = conn.Write([]byte(t.config.MyId.ID + endOfIdChar))
-		if err != nil {
-			iLogger.Error(nil, "[TCPMessageEndpoint] error in write Id in listen")
-			conn.Close()
-			continue
-		}
+			_, err = conn.Write([]byte(t.config.MyId.ID + endOfIdChar))
+			if err != nil {
+				iLogger.Error(nil, "[TCPMessageEndpoint] error in write Id in listen")
+				conn.Close()
+				return
+			}
 
-		recvId := recvStr[:len(recvStr)-len(endOfIdChar)]
-		t.connMap[MemberID{ID: recvId}] = conn
-		lock := &sync.Mutex{}
-		t.sendLockMap[MemberID{ID: recvId}] = lock
-		go t.startReceiver(MemberID{ID: recvId}, conn)
+			recvId := recvStr[:len(recvStr)-len(endOfIdChar)]
+			t.connMap[MemberID{ID: recvId}] = conn
+			lock := &sync.Mutex{}
+			t.sendLockMap[MemberID{ID: recvId}] = lock
+			go t.startReceiver(MemberID{ID: recvId}, conn)
+		}()
+
 	}
 }
 

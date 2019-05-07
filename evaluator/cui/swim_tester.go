@@ -4,24 +4,27 @@ import (
 	"fmt"
 	"github.com/DE-labtory/iLogger"
 	"github.com/DE-labtory/swim"
-	"net"
-	"time"
 	"github.com/DE-labtory/swim/cui"
+	"github.com/DE-labtory/swim/evaluator"
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
+	"net"
+	"sort"
 	"strconv"
 	"strings"
-	"sort"
 	"sync"
+	"time"
 )
 
 type Evaluator struct {
-	ExactMember []swim.Member
-	Swimmer     map[string]*swim.SWIM
-	MsgEndpoint map[string]*swim.EvaluatorMessageEndpoint
-	lastID      int
-	cmdLog      *widgets.List
-	renderLock  sync.Mutex
+	ExactMember   []swim.Member
+	Swimmer       map[string]*swim.SWIM
+	MsgEndpoint   map[string]*swim.EvaluatorMessageEndpoint
+	lastID        int
+	lastCheckPort int
+	cmdLog        *widgets.List
+	renderLock    sync.Mutex
+	nodeInfoCur   int
 }
 
 func main() {
@@ -44,11 +47,13 @@ func main() {
 	sl1.Title = "In"
 	sl1.Data = sparkData
 	sl1.LineColor = ui.ColorRed
+	sl1.MaxVal = 3
 
 	sl2 := widgets.NewSparkline()
 	sl2.Title = "Out"
 	sl2.Data = sparkData
 	sl2.LineColor = ui.ColorMagenta
+	sl2.MaxVal = 3
 
 	slg1 := widgets.NewSparklineGroup(sl1, sl2)
 	slg1.Title = "Avg network load"
@@ -126,11 +131,10 @@ func main() {
 		tick := 0
 		for {
 			time.Sleep(50 * time.Millisecond)
-			str, _ := processMemberStatus(ev.ExactMember, ev.Swimmer)
+			str, _ := processMemberStatus(ev.ExactMember, ev.Swimmer, ev.nodeInfoCur)
 			nodeInfo.Text = str
-			//g2.Percent = int(avgProb)
 			ev.Render(nodeInfo)
-			//ui.Render(g2)
+
 			tick++
 			if tick%40 == 0 {
 				nodeInfo.Text = " "
@@ -147,6 +151,9 @@ func main() {
 			slg1.Sparklines[0].Data = append(slg1.Sparklines[0].Data[1:], in)
 			slg1.Sparklines[1].Data = append(slg1.Sparklines[1].Data[1:], out)
 			ev.Render(slg1)
+			_, avgProb := processMemberStatus(ev.ExactMember, ev.Swimmer, ev.nodeInfoCur)
+			g2.Percent = int(avgProb)
+			ui.Render(g2)
 
 		}
 	}()
@@ -162,6 +169,13 @@ func main() {
 				tb.Backspace()
 			case "<Left>":
 				tb.MoveCursorLeft()
+			case "<Up>":
+				if ev.nodeInfoCur > 0 {
+					ev.nodeInfoCur -= 1
+				}
+			case "<Down>":
+				ev.nodeInfoCur += 1
+
 			case "<Right>":
 				tb.MoveCursorRight()
 			case "<Space>":
@@ -201,8 +215,8 @@ func (e *Evaluator) processCommand(cmd string) string {
 		for i := 0; i < num; i++ {
 
 			e.lastID++
-			tcpPort := 20000 + e.lastID*2
-			udpPort := 20000 + e.lastID*2 + 1
+			tcpPort := evaluator.GetAvailablePort(2000)
+			udpPort := tcpPort
 			id := strconv.Itoa(e.lastID)
 
 			s, msgEndpoint := SetupSwim("127.0.0.1", tcpPort, udpPort, id)
@@ -249,50 +263,22 @@ func (e *Evaluator) processCommand(cmd string) string {
 		} else {
 			return "input swim src id is invalid. input : " + src
 		}
+	case "delete","remove":
+		if len(cmdList) < 2 {
+			return "you have to input id to remove [ex : remove 2, delete 6]"
+		}
+		id := cmdList[1]
+		if swimmer,ok := e.Swimmer[id]; ok{
+			if !swimmer.IsRun(){
+				return "that swimmer is already die..."
+			}
+			swimmer.ShutDown()
+			return "successfully remove swimmer : "+id
+		}else{
+			return "there is no swimmer : "+id
+		}
 	default:
 		return "invalid cmd : " + cmdDomain
-	}
-
-	return "unknown"
-}
-
-func before2() {
-
-	swimObjList := make([]*swim.SWIM, 0)
-	for i := 0; i < 500; i++ {
-		swimObj, _ := SetupSwim("127.0.0.1", 45000+i, 55000+i, strconv.Itoa(i))
-		go swimObj.Start()
-		swimObjList = append(swimObjList, swimObj)
-		time.Sleep(10 * time.Millisecond)
-	}
-	time.Sleep(3 * time.Second)
-
-	for idx, sObj := range swimObjList {
-		if idx == 0 {
-			continue
-		}
-		sObj.Join([]string{"127.0.0.1:55000"})
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	counter := 0
-	time.Sleep(3000 * time.Millisecond)
-
-	startTime := time.Now()
-	for {
-		s2mm := swimObjList[2].GetMemberMap()
-		passTime := fmt.Sprintf("%.2f", time.Now().Sub(startTime).Seconds())
-
-		infoStr := "time pass: " + passTime + "s, I know : " + strconv.Itoa(len(s2mm.GetMembers())) + ","
-		for _, a := range s2mm.GetMembers() {
-			infoStr = infoStr + "IP : " + a.UDPAddress() + ",status :" + a.Status.String() + "||"
-		}
-		iLogger.Info(nil, infoStr)
-		time.Sleep(1000 * time.Millisecond)
-		counter++
-		if counter == 30 {
-			swimObjList[50].ShutDown()
-		}
 	}
 }
 
@@ -358,7 +344,7 @@ type IdProbStruct struct {
 	isRun bool
 }
 
-func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.SWIM) (string, float64) {
+func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.SWIM, nodeInfoCur int) (string, float64) {
 
 	dataList := make([]IdProbStruct, 0)
 	totalProb := float64(0)
@@ -372,7 +358,17 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 			isRun: swimmer.IsRun(),
 		})
 	}
-	avgProb := totalProb / float64(len(swimmers))
+	memLen := len(swimmers)
+	if memLen == 0 {
+		memLen = 1
+	}
+	avgProb := totalProb / float64(memLen)
+	if avgProb < 0 {
+		avgProb = float64(0)
+	}
+	if avgProb > 100 {
+		avgProb = float64(100)
+	}
 	sort.Slice(dataList[:], func(i, j int) bool {
 		return dataList[i].id < dataList[j].id
 	})
@@ -402,7 +398,6 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 			visualizeString += fmt.Sprintf("%4sR", oneData.id)
 			break
 		default:
-			
 
 		}
 		counter++
@@ -412,6 +407,14 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 		}
 
 	}
+
+	nodeInfoData := strings.Split(visualizeString, "\n")
+	if nodeInfoCur<len(nodeInfoData){
+		nodeInfoData = nodeInfoData[nodeInfoCur:]
+	}
+
+	visualizeString = strings.Join(nodeInfoData[:], "\n")
+
 	return visualizeString, avgProb
 }
 
