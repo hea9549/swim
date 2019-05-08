@@ -561,7 +561,7 @@ func TestMessageEndpoint_SyncSend_When_Timeout(t *testing.T) {
 	wg.Wait()
 }
 
-// Send internal test send message to myself
+// ExchangeMessage internal test send message to myself
 // 1. send message using Transport
 // 2. Listen receive sent message
 // 3. then call message handler handle function

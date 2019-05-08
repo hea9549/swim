@@ -1805,7 +1805,7 @@ func TestSWIM_probe_When_Target_Respond_To_Indirect_Ping(t *testing.T) {
 		assert.Equal(t, msg.Address, mIAddress)
 
 		ping := createPingMessage(xid.New().String(), mK1Address, &pb.MbrStatsMsg{})
-		// Send ping message to mj
+		// ExchangeMessage ping message to mj
 		mk1MessageEndpoint.SyncSend(mJAddress, ping)
 		ack := createAckMessage(msg.Id, mK1Address, &pb.MbrStatsMsg{})
 		// send back to mi
@@ -1827,7 +1827,7 @@ func TestSWIM_probe_When_Target_Respond_To_Indirect_Ping(t *testing.T) {
 		assert.Equal(t, msg.Address, mIAddress)
 
 		ping := createPingMessage(xid.New().String(), mK2Address, &pb.MbrStatsMsg{})
-		// Send ping message to mj
+		// ExchangeMessage ping message to mj
 		mk2MessageEndpoint.SyncSend(mJAddress, ping)
 		ack := createAckMessage(msg.Id, mK2Address, &pb.MbrStatsMsg{})
 		// send back to mi
@@ -1952,7 +1952,7 @@ func TestSWIM_probe_When_Target_Not_Respond_To_Indirect_Ping(t *testing.T) {
 		assert.Equal(t, msg.Address, mIAddress)
 
 		ping := createPingMessage(xid.New().String(), mK1Address, &pb.MbrStatsMsg{})
-		// Send ping message to mj
+		// ExchangeMessage ping message to mj
 		_, err := mk1MessageEndpoint.SyncSend(mJAddress, ping)
 
 		assert.Error(t, err, ErrSendTimeout)
@@ -1977,7 +1977,7 @@ func TestSWIM_probe_When_Target_Not_Respond_To_Indirect_Ping(t *testing.T) {
 		assert.Equal(t, msg.Address, mIAddress)
 
 		ping := createPingMessage(xid.New().String(), mK2Address, &pb.MbrStatsMsg{})
-		// Send ping message to mj
+		// ExchangeMessage ping message to mj
 		_, err := mk2MessageEndpoint.SyncSend(mJAddress, ping)
 
 		assert.Error(t, err, ErrSendTimeout)

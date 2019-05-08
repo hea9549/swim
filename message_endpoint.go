@@ -266,8 +266,8 @@ func (m *DefaultMessageEndpoint) SyncSend(addr string, msg pb.Message) (pb.Messa
 	return pb.Message{}, ErrUnreachable
 }
 
-// Send asynchronously send message to member of addr, don't wait until response come back,
-// after response came back, callback function executed, Send can be used in the case of
+// ExchangeMessage asynchronously send message to member of addr, don't wait until response come back,
+// after response came back, callback function executed, ExchangeMessage can be used in the case of
 // gossip message to other members
 func (m *DefaultMessageEndpoint) Send(addr string, msg pb.Message) error {
 	d, err := proto.Marshal(&msg)
@@ -430,8 +430,8 @@ func (m *EvaluatorMessageEndpoint) SyncSend(addr string, msg pb.Message) (pb.Mes
 	return pb.Message{}, ErrUnreachable
 }
 
-// Send asynchronously send message to member of addr, don't wait until response come back,
-// after response came back, callback function executed, Send can be used in the case of
+// ExchangeMessage asynchronously send message to member of addr, don't wait until response come back,
+// after response came back, callback function executed, ExchangeMessage can be used in the case of
 // gossip message to other members
 func (m *EvaluatorMessageEndpoint) Send(addr string, msg pb.Message) error {
 	d, err := proto.Marshal(&msg)

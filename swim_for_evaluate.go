@@ -2,6 +2,8 @@ package swim
 
 import (
 	"github.com/DE-labtory/iLogger"
+	"github.com/DE-labtory/swim/pb"
+	"github.com/rs/xid"
 	"net"
 	"sync"
 	)
@@ -64,7 +66,18 @@ func NewSwimForEvaluate(config *Config, suspicionConfig *SuspicionConfig, messag
 
 	swim.messageEndpoint = messageEndpoint
 
-	tcpMessageEndpoint := NewTCPMessageEndpoint(tcpMessageEndpointConfig, &swim)
+	tcpMessageEndpoint := NewTCPMessageEndpoint(tcpMessageEndpointConfig, &swim ,func() pb.Message {
+		membership := swim.createMembership()
+
+		msg := pb.Message{
+			Address: swim.member.UDPAddress(),
+			Id:      xid.New().String(),
+			Payload: &pb.Message_Membership{
+				Membership: membership,
+			},
+		}
+		return msg
+	})
 	swim.tcpMessageEndpoint = tcpMessageEndpoint
 
 	return &swim, messageEndpoint
