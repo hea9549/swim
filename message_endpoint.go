@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DE-labtory/iLogger"
 	"github.com/DE-labtory/swim/pb"
 	"github.com/gogo/protobuf/proto"
+	"github.com/DE-labtory/iLogger"
 )
 
 var ErrSendTimeout = errors.New("Error send timeout")
@@ -487,11 +487,9 @@ func (m *EvaluatorMessageEndpoint) PopInPacketCounter() int {
 	m.packetInCounterLock.Lock()
 	defer m.packetInCounterLock.Unlock()
 	d := m.packetInCounter
-	m.packetInCounter =0
+	m.packetInCounter = 0
 	return d
 }
-
-
 
 func (m *EvaluatorMessageEndpoint) addOutPacketCounter() {
 	m.packetOutCounterLock.Lock()
@@ -519,7 +517,7 @@ func (m *EvaluatorMessageEndpoint) PopOutPacketCounter() int {
 	m.packetOutCounterLock.Lock()
 	defer m.packetOutCounterLock.Unlock()
 	d := m.packetOutCounter
-	m.packetOutCounter =0
+	m.packetOutCounter = 0
 	return d
 
 }

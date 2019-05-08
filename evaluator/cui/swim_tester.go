@@ -14,28 +14,33 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"math"
 )
 
 type Evaluator struct {
-	ExactMember   []swim.Member
-	Swimmer       map[string]*swim.SWIM
-	MsgEndpoint   map[string]*swim.EvaluatorMessageEndpoint
-	lastID        int
-	lastCheckPort int
-	cmdLog        *widgets.List
-	renderLock    sync.Mutex
-	nodeInfoCur   int
+	ExactMember    []swim.Member
+	Swimmer        map[string]*swim.SWIM
+	MsgEndpoint    map[string]*swim.EvaluatorMessageEndpoint
+	lastID         int
+	lastCheckPort  int
+	cmdLog         *widgets.List
+	renderLock     sync.Mutex
+	dataAccessLock sync.Mutex
+	nodeInfoCur    int
 }
 
 func main() {
-
+	iLogger.EnableStd(false)
 	ev := &Evaluator{
-		ExactMember: make([]swim.Member, 0),
-		Swimmer:     make(map[string]*swim.SWIM),
-		MsgEndpoint: make(map[string]*swim.EvaluatorMessageEndpoint),
-		lastID:      0,
-		cmdLog:      widgets.NewList(),
-		renderLock:  sync.Mutex{},
+		ExactMember:    make([]swim.Member, 0),
+		Swimmer:        make(map[string]*swim.SWIM),
+		MsgEndpoint:    make(map[string]*swim.EvaluatorMessageEndpoint),
+		lastID:         0,
+		lastCheckPort:  0,
+		cmdLog:         widgets.NewList(),
+		renderLock:     sync.Mutex{},
+		dataAccessLock: sync.Mutex{},
+		nodeInfoCur:    0,
 	}
 
 	if err := ui.Init(); err != nil {
@@ -96,7 +101,7 @@ func main() {
 
 	g := widgets.NewGauge()
 	g.Title = "Last Data Cover Rate"
-	g.Percent = 50
+	g.Percent = 0
 	g.SetRect(82, 0, 110, 3)
 	g.BarColor = ui.ColorRed
 	g.BorderStyle.Fg = ui.ColorWhite
@@ -112,7 +117,7 @@ func main() {
 
 	g3 := widgets.NewGauge()
 	g3.Title = "Custom Command Gauge"
-	g3.Percent = 50
+	g3.Percent = 0
 	g3.SetRect(82, 6, 110, 9)
 	g3.BarColor = ui.ColorRed
 	g3.BorderStyle.Fg = ui.ColorWhite
@@ -130,31 +135,30 @@ func main() {
 	go func() {
 		tick := 0
 		for {
-			time.Sleep(50 * time.Millisecond)
-			str, _ := processMemberStatus(ev.ExactMember, ev.Swimmer, ev.nodeInfoCur)
+			ev.dataAccessLock.Lock()
+			time.Sleep(100 * time.Millisecond)
+			ev.AppendLog("1")
+			str, avgProb := processMemberStatus(ev.ExactMember, ev.Swimmer, ev.nodeInfoCur)
+			ev.AppendLog("2")
 			nodeInfo.Text = str
 			ev.Render(nodeInfo)
-
+			ev.AppendLog("3")
+			in, out := processInOutPacketSparkle(ev.MsgEndpoint)
+			ev.AppendLog("4")
+			slg1.Sparklines[0].Data = append(slg1.Sparklines[0].Data[1:], in)
+			slg1.Sparklines[1].Data = append(slg1.Sparklines[1].Data[1:], out)
+			ev.Render(slg1)
+			if avgProb<0 || avgProb>100 || math.IsNaN(avgProb){
+				ev.AppendLog("non detected")
+			}
+			g2.Percent = int(avgProb)
+			ui.Render(g2)
 			tick++
 			if tick%40 == 0 {
 				nodeInfo.Text = " "
 				ev.Render(nodeInfo)
 			}
-
-		}
-	}()
-
-	go func() {
-		for {
-			time.Sleep(500 * time.Millisecond)
-			in, out := processInOutPacketSparkle(ev.MsgEndpoint)
-			slg1.Sparklines[0].Data = append(slg1.Sparklines[0].Data[1:], in)
-			slg1.Sparklines[1].Data = append(slg1.Sparklines[1].Data[1:], out)
-			ev.Render(slg1)
-			_, avgProb := processMemberStatus(ev.ExactMember, ev.Swimmer, ev.nodeInfoCur)
-			g2.Percent = int(avgProb)
-			ui.Render(g2)
-
+			ev.dataAccessLock.Unlock()
 		}
 	}()
 
@@ -215,7 +219,7 @@ func (e *Evaluator) processCommand(cmd string) string {
 		for i := 0; i < num; i++ {
 
 			e.lastID++
-			tcpPort := evaluator.GetAvailablePort(2000)
+			tcpPort := evaluator.GetAvailablePort(20000)
 			udpPort := tcpPort
 			id := strconv.Itoa(e.lastID)
 
@@ -263,19 +267,25 @@ func (e *Evaluator) processCommand(cmd string) string {
 		} else {
 			return "input swim src id is invalid. input : " + src
 		}
-	case "delete","remove":
+	case "delete", "remove":
 		if len(cmdList) < 2 {
 			return "you have to input id to remove [ex : remove 2, delete 6]"
 		}
 		id := cmdList[1]
-		if swimmer,ok := e.Swimmer[id]; ok{
-			if !swimmer.IsRun(){
+		if swimmer, ok := e.Swimmer[id]; ok {
+			if !swimmer.IsRun() {
 				return "that swimmer is already die..."
 			}
 			swimmer.ShutDown()
-			return "successfully remove swimmer : "+id
-		}else{
-			return "there is no swimmer : "+id
+			for idx, mem := range e.ExactMember {
+				if mem.ID.ID == id {
+					e.ExactMember = append(e.ExactMember[:idx], e.ExactMember[idx+1:]...)
+					break
+				}
+			}
+			return "successfully remove swimmer : " + id
+		} else {
+			return "there is no swimmer : " + id
 		}
 	default:
 		return "invalid cmd : " + cmdDomain
@@ -331,9 +341,12 @@ func processInOutPacketSparkle(swimmers map[string]*swim.EvaluatorMessageEndpoin
 		totalInPacket += m.PopInPacketCounter()
 		totalOutPacket += m.PopOutPacketCounter()
 	}
-
-	avgInPacket := float64(totalInPacket) / float64(len(swimmers))
-	avgOutPacket := float64(totalOutPacket) / float64(len(swimmers))
+	lenSwimmer := float64(len(swimmers))
+	if lenSwimmer ==0{
+		lenSwimmer = float64(1)
+	}
+	avgInPacket := float64(totalInPacket) / lenSwimmer
+	avgOutPacket := float64(totalOutPacket) / lenSwimmer
 
 	return avgInPacket, avgOutPacket
 }
@@ -348,6 +361,7 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 
 	dataList := make([]IdProbStruct, 0)
 	totalProb := float64(0)
+
 	for _, swimmer := range swimmers {
 		memberMap := swimmer.GetMemberMap()
 		prob := compareMemberList(exactMembers, memberMap.GetMembers())
@@ -379,7 +393,7 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 		case !oneData.isRun:
 			visualizeString += fmt.Sprintf("%4sW", oneData.id)
 			break
-		case oneData.prob >= float64(99):
+		case oneData.prob >= float64(100):
 			visualizeString += fmt.Sprintf("%4sG", oneData.id)
 			break
 		case oneData.prob >= float64(95):
@@ -398,7 +412,7 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 			visualizeString += fmt.Sprintf("%4sR", oneData.id)
 			break
 		default:
-
+			visualizeString+=""
 		}
 		counter++
 		if counter == 12 {
@@ -409,7 +423,10 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 	}
 
 	nodeInfoData := strings.Split(visualizeString, "\n")
-	if nodeInfoCur<len(nodeInfoData){
+	if nodeInfoCur <0{
+		nodeInfoCur = 0
+	}
+	if nodeInfoCur < len(nodeInfoData) {
 		nodeInfoData = nodeInfoData[nodeInfoCur:]
 	}
 

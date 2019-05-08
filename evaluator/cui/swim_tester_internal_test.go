@@ -11,12 +11,15 @@ import (
 
 func TestProcessCommand(t *testing.T) {
 	ev := &Evaluator{
-		ExactMember: make([]swim.Member, 0),
-		Swimmer:     make(map[string]*swim.SWIM),
-		MsgEndpoint: make(map[string]*swim.EvaluatorMessageEndpoint),
-		lastID:      0,
-		cmdLog:      nil,
-		renderLock:  sync.Mutex{},
+		ExactMember:    make([]swim.Member, 0),
+		Swimmer:        make(map[string]*swim.SWIM),
+		MsgEndpoint:    make(map[string]*swim.EvaluatorMessageEndpoint),
+		lastID:         0,
+		lastCheckPort:  0,
+		cmdLog:         nil,
+		renderLock:     sync.Mutex{},
+		dataAccessLock: sync.Mutex{},
+		nodeInfoCur:    0,
 	}
 	ev.processCommand("create 10")
 	time.Sleep(time.Second)

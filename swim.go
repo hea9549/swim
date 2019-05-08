@@ -410,22 +410,22 @@ func (s *SWIM) startFailureDetector() {
 		periodTick := 0
 		for !s.toDie() {
 			members := s.memberMap.GetMembers()
-			currentInterval := time.Duration(s.awareness.score+1) * baseInterval
+			currentInterval := time.Duration(s.awareness.GetHealthScore()+1) * baseInterval
 			if len(members) < 1 {
 				time.Sleep(currentInterval)
 				continue
 			}
 
 			for _, m := range members {
-				currentInterval := time.Duration(s.awareness.score+1) * baseInterval
-				//iLogger.Info(nil, "[swim] start probing ..."+s.member.ID.ID+"->"+m.ID.ID)
+				currentInterval := time.Duration(s.awareness.GetHealthScore()+1) * baseInterval
+				iLogger.Info(nil, "[swim] start probing ..."+s.member.ID.ID+"->"+m.ID.ID)
 				s.probe(m, currentInterval)
 				periodTick++
 				if periodTick >= s.config.TryExchangeMembershipPeriod {
 					s.exchangeMembership(m)
 					periodTick = 0
 				}
-				//iLogger.Info(nil, "[swim] done probing !"+s.member.ID.ID+"->"+m.ID.ID)
+				iLogger.Info(nil, "[swim] done probing !"+s.member.ID.ID+"->"+m.ID.ID)
 
 			}
 
