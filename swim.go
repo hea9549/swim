@@ -112,7 +112,7 @@ type SWIM struct {
 }
 
 func New(config *Config, suspicionConfig *SuspicionConfig, messageEndpointConfig MessageEndpointConfig,
-	tcpMessageEndpointconfig TCPMessageEndpointConfig, member *Member) *SWIM {
+	tcpMessageEndpointConfig TCPMessageEndpointConfig, member *Member) *SWIM {
 	if config.T < config.AckTimeOut {
 		iLogger.Panic(nil, "T time must be longer than ack time-out")
 	}
@@ -129,7 +129,7 @@ func New(config *Config, suspicionConfig *SuspicionConfig, messageEndpointConfig
 	messageEndpoint := messageEndpointFactory(config, messageEndpointConfig, &swim)
 	swim.messageEndpoint = messageEndpoint
 
-	tcpMessageEndpoint := NewTCPMessageEndpoint(tcpMessageEndpointconfig, &swim, func() pb.Message {
+	tcpMessageEndpoint := NewTCPMessageEndpoint(tcpMessageEndpointConfig, &swim, func() pb.Message {
 		membership := swim.createMembership()
 
 		msg := pb.Message{

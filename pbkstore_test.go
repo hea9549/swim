@@ -29,7 +29,7 @@ func NewMbrStatsMsg(id string) pb.MbrStatsMsg {
 	return pb.MbrStatsMsg{
 		Id:          id,
 		Incarnation: 1,
-		Address:     "123",
+		UdpAddress:     "123",
 	}
 }
 

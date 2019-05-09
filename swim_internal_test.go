@@ -62,6 +62,12 @@ func TestSWIM_ShutDown(t *testing.T) {
 		MessageEndpointConfig{
 			CallbackCollectInterval: 1000,
 		},
+		TCPMessageEndpointConfig{
+			EncryptionEnabled: false,
+			TCPTimeout:        0,
+			IP:                "127.0.0.1",
+			Port:              3000,
+		},
 		&Member{},
 	)
 
@@ -139,7 +145,7 @@ func TestSWIM_handlembrStatsMsg_refute_bigger(t *testing.T) {
 			MbrStatsMsg: &pb.MbrStatsMsg{
 				Id:          "abcde",
 				Incarnation: 5,
-				Address:     "127.0.0.1:11151",
+				UdpAddress:     "127.0.0.1:11151",
 			},
 		},
 	}
@@ -189,7 +195,7 @@ func TestSWIM_handlembrStatsMsg_refute_less(t *testing.T) {
 			MbrStatsMsg: &pb.MbrStatsMsg{
 				Id:          "abcde",
 				Incarnation: 5,
-				Address:     "127.0.0.1:11153",
+				UdpAddress:     "127.0.0.1:11153",
 			},
 		},
 	}
@@ -233,7 +239,7 @@ func TestSWIM_HandleMbrStatsMsg_AliveMsg(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Alive,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	// when
@@ -243,7 +249,7 @@ func TestSWIM_HandleMbrStatsMsg_AliveMsg(t *testing.T) {
 	assert.Equal(t, pushedMbrStatsMsg.Type, stats.Type)
 	assert.Equal(t, pushedMbrStatsMsg.Id, stats.Id)
 	assert.Equal(t, pushedMbrStatsMsg.Incarnation, stats.Incarnation)
-	assert.Equal(t, pushedMbrStatsMsg.Address, stats.Address)
+	assert.Equal(t, pushedMbrStatsMsg.UdpAddress, stats.UdpAddress)
 
 	assert.Equal(t, mm.members[MemberID{ID: "1"}].Status, Alive)
 	assert.Equal(t, mm.members[MemberID{ID: "1"}].Incarnation, stats.Incarnation)
@@ -281,7 +287,7 @@ func TestSWIM_HandleMbrStatsMsg_AliveMsg_Error(t *testing.T) {
 		Id:          "1",
 		Incarnation: uint32(2),
 		// error occured becuase of invalid address format
-		Address: "1.2.3.4.555:5555",
+		UdpAddress: "1.2.3.4.555:5555",
 	}
 
 	// when
@@ -333,7 +339,7 @@ func TestSWIM_HandleMbrStatsMsg_SuspectMsg(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Suspect,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	// when
@@ -344,7 +350,7 @@ func TestSWIM_HandleMbrStatsMsg_SuspectMsg(t *testing.T) {
 	assert.Equal(t, pushedMbrStatsMsg.Type, stats.Type)
 	assert.Equal(t, pushedMbrStatsMsg.Id, stats.Id)
 	assert.Equal(t, pushedMbrStatsMsg.Incarnation, stats.Incarnation)
-	assert.Equal(t, pushedMbrStatsMsg.Address, stats.Address)
+	assert.Equal(t, pushedMbrStatsMsg.UdpAddress, stats.UdpAddress)
 	assert.Equal(t, mm.members[MemberID{ID: "1"}].Status, Suspected)
 	assert.Equal(t, mm.members[MemberID{ID: "1"}].Incarnation, stats.Incarnation)
 }
@@ -381,7 +387,7 @@ func TestSWIM_HandleMbrStatsMsg_SuspectMsg_Error(t *testing.T) {
 		Id:          "1",
 		Incarnation: uint32(2),
 		// error occured becuase of invalid address format
-		Address: "1.2.3.4.555:5555",
+		UdpAddress: "1.2.3.4.555:5555",
 	}
 
 	// when
@@ -403,7 +409,7 @@ func TestSWIM_handlePing(t *testing.T) {
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          "mbrStatsMsg_id1",
 			Incarnation: 123,
-			Address:     "address123",
+			UdpAddress:     "address123",
 		}, nil
 	}
 
@@ -446,7 +452,7 @@ func TestSWIM_handlePing(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp.Payload.(*pb.Message_Ack))
 	assert.Equal(t, resp.Id, id)
-	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Address, "address123")
+	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.UdpAddress, "address123")
 	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Incarnation, uint32(123))
 	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Id, "mbrStatsMsg_id1")
 }
@@ -462,7 +468,7 @@ func TestSWIM_handleIndirectPing(t *testing.T) {
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          "mbrStatsMsg_id1",
 			Incarnation: 123,
-			Address:     "address123",
+			UdpAddress:     "address123",
 		}, nil
 	}
 
@@ -523,7 +529,7 @@ func TestSWIM_handleIndirectPing(t *testing.T) {
 	mJMessageHandler.handleFunc = func(msg pb.Message) {
 		// check whether msg.Payload type is *pb.Message_Ping
 		assert.NotNil(t, msg.Payload.(*pb.Message_Ping))
-		assert.Equal(t, msg.PiggyBack.MbrStatsMsg.Address, "address123")
+		assert.Equal(t, msg.PiggyBack.MbrStatsMsg.UdpAddress, "address123")
 		assert.Equal(t, msg.PiggyBack.MbrStatsMsg.Incarnation, uint32(123))
 		assert.Equal(t, msg.PiggyBack.MbrStatsMsg.Id, "mbrStatsMsg_id1")
 
@@ -537,7 +543,7 @@ func TestSWIM_handleIndirectPing(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp.Payload.(*pb.Message_Ack))
 	assert.Equal(t, resp.Id, id)
-	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Address, "address123")
+	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.UdpAddress, "address123")
 	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Incarnation, uint32(123))
 	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Id, "mbrStatsMsg_id1")
 }
@@ -553,7 +559,7 @@ func TestSWIM_handleIndirectPing_Target_Timeout(t *testing.T) {
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          "mbrStatsMsg_id1",
 			Incarnation: 123,
-			Address:     "address123",
+			UdpAddress:     "address123",
 		}, nil
 	}
 
@@ -617,7 +623,7 @@ func TestSWIM_handleIndirectPing_Target_Timeout(t *testing.T) {
 	mJMessageHandler.handleFunc = func(msg pb.Message) {
 		// check whether msg.Payload type is *pb.Message_Ping
 		assert.NotNil(t, msg.Payload.(*pb.Message_Ping))
-		assert.Equal(t, msg.PiggyBack.MbrStatsMsg.Address, "address123")
+		assert.Equal(t, msg.PiggyBack.MbrStatsMsg.UdpAddress, "address123")
 		assert.Equal(t, msg.PiggyBack.MbrStatsMsg.Incarnation, uint32(123))
 		assert.Equal(t, msg.PiggyBack.MbrStatsMsg.Id, "mbrStatsMsg_id1")
 
@@ -628,7 +634,7 @@ func TestSWIM_handleIndirectPing_Target_Timeout(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resp.Payload.(*pb.Message_Nack))
 	assert.Equal(t, resp.Id, id)
-	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Address, "address123")
+	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.UdpAddress, "address123")
 	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Incarnation, uint32(123))
 	assert.Equal(t, resp.PiggyBack.MbrStatsMsg.Id, "mbrStatsMsg_id1")
 }
@@ -638,7 +644,7 @@ func TestConvMbrStatsToAliveMsg_InvalidMsgType(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Suspect,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	swim := &SWIM{}
@@ -655,7 +661,7 @@ func TestConvMbrStatsToAliveMsg_InvalidAddressFormat(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Suspect,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4.5:5555",
+		UdpAddress:     "1.2.3.4.5:5555",
 	}
 
 	swim := &SWIM{}
@@ -672,7 +678,7 @@ func TestConvMbrStatsToAliveMsg_Success(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Alive,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	swim := &SWIM{}
@@ -692,7 +698,7 @@ func TestConvMbrStatsToSuspectMsg_InvalidMsgType(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Alive,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	swim := &SWIM{}
@@ -709,7 +715,7 @@ func TestConvMbrStatsToSuspectMsg_InvalidAddressFormat(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Alive,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4.555:5555",
+		UdpAddress:     "1.2.3.4.555:5555",
 	}
 
 	swim := &SWIM{}
@@ -726,7 +732,7 @@ func TestConvMbrStatsToSuspectMsg_Success(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Suspect,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	swim := &SWIM{
@@ -751,7 +757,7 @@ func TestHandleAliveMbrStats_InvalidMsgType(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Suspect,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	swim := &SWIM{}
@@ -768,7 +774,7 @@ func TestHandleAliveMbrStats_Success(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Alive,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	mm := NewMemberMap(&SuspicionConfig{})
@@ -794,7 +800,7 @@ func TestHandleSuspectMbrStats_InvalidMsgType(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Alive,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	swim := &SWIM{}
@@ -811,7 +817,7 @@ func TestHandleSuspectMbrStats_Success(t *testing.T) {
 		Type:        pb.MbrStatsMsg_Suspect,
 		Id:          "1",
 		Incarnation: uint32(2),
-		Address:     "1.2.3.4:5555",
+		UdpAddress:     "1.2.3.4:5555",
 	}
 
 	mm := NewMemberMap(&SuspicionConfig{})
@@ -850,7 +856,7 @@ func TestSWIM_indirectPing_When_Response_Success(t *testing.T) {
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          "123",
 			Incarnation: uint32(123),
-			Address:     "pbk-addr1",
+			UdpAddress:     "pbk-addr1",
 		},
 	}
 	pbkStore := MockMbrStatsMsgStore{}
@@ -872,7 +878,7 @@ func TestSWIM_indirectPing_When_Response_Success(t *testing.T) {
 				Type:        pb.MbrStatsMsg_Alive,
 				Id:          "555",
 				Incarnation: uint32(345),
-				Address:     "pbk-addr2",
+				UdpAddress:     "pbk-addr2",
 			},
 		},
 	}
@@ -933,7 +939,7 @@ func TestSWIM_indirectPing_When_Response_Failed(t *testing.T) {
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          "123",
 			Incarnation: uint32(123),
-			Address:     "pbk-addr1",
+			UdpAddress:     "pbk-addr1",
 		},
 	}
 	pbkStore := MockMbrStatsMsgStore{}
@@ -997,7 +1003,7 @@ func TestSWIM_indirectPing_When_One_Of_Other_Member_Sent_Ack(t *testing.T) {
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          "123",
 			Incarnation: uint32(123),
-			Address:     "pbk-addr1",
+			UdpAddress:     "pbk-addr1",
 		},
 	}
 	pbkStore := MockMbrStatsMsgStore{}
@@ -1032,7 +1038,7 @@ func TestSWIM_indirectPing_When_One_Of_Other_Member_Sent_Ack(t *testing.T) {
 					Type:        pb.MbrStatsMsg_Alive,
 					Id:          "555",
 					Incarnation: uint32(345),
-					Address:     "pbk-addr2",
+					UdpAddress:     "pbk-addr2",
 				},
 			},
 		}, nil
@@ -1079,7 +1085,7 @@ func TestSWIM_ping_When_Response_Success(t *testing.T) {
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          "123",
 			Incarnation: uint32(123),
-			Address:     "pbk-addr1",
+			UdpAddress:     "pbk-addr1",
 		},
 	}
 	pbkStore := MockMbrStatsMsgStore{}
@@ -1101,7 +1107,7 @@ func TestSWIM_ping_When_Response_Success(t *testing.T) {
 				Type:        pb.MbrStatsMsg_Alive,
 				Id:          "555",
 				Incarnation: uint32(345),
-				Address:     "pbk-addr2",
+				UdpAddress:     "pbk-addr2",
 			},
 		},
 	}
@@ -1154,7 +1160,7 @@ func TestSWIM_ping_When_Response_Failed(t *testing.T) {
 			Type:        pb.MbrStatsMsg_Alive,
 			Id:          "123",
 			Incarnation: uint32(123),
-			Address:     "pbk-addr1",
+			UdpAddress:     "pbk-addr1",
 		},
 	}
 	pbkStore := MockMbrStatsMsgStore{}

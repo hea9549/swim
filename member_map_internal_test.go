@@ -236,14 +236,14 @@ func TestMemberMap_SelectKRandomMember(t *testing.T) {
 
 	// case 1: randomly select all members
 	members := m.GetMembers()
-	rMembers := m.SelectKRandomMemberID(3)
+	rMembers := m.SelectKRandomMemberID(3,&MemberID{ID: "0"})
 	for i := 0; i < len(members); i++ {
 
 		assert.True(t, checkExist(rMembers, members[i]))
 	}
 
 	// case 2: when K is larger then length of members
-	assert.Equal(t, len(m.SelectKRandomMemberID(5)), 3)
+	assert.Equal(t, len(m.SelectKRandomMemberID(5,&MemberID{ID: "0"})), 3)
 }
 
 func TestMemberMap_Suspect_MessageId_Empty(t *testing.T) {
