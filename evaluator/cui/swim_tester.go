@@ -2,200 +2,35 @@ package main
 
 import (
 	"fmt"
+	"github.com/DE-labtory/iLogger"
 	"github.com/DE-labtory/swim"
+	"github.com/DE-labtory/swim/cui"
 	"github.com/DE-labtory/swim/evaluator"
 	ui "github.com/gizak/termui/v3"
-	"github.com/gizak/termui/v3/widgets"
+	"math"
 	"net"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	_ "net/http/pprof"
-	"github.com/DE-labtory/iLogger"
-	"net/http"
-	"github.com/DE-labtory/swim/cui"
-	"math"
 )
 
-type Evaluator struct {
-	ExactMember []swim.Member
-	Swimmer     map[string]*swim.SWIM
-	MsgEndpoint map[string]*swim.EvaluatorMessageEndpoint
-	lastID      int
-	cmdLog      *widgets.List
-	nodeInfoCur int
-	processLock sync.Mutex
-}
-
-func testFmt() {
-	iLogger.EnableStd(false)
-	ev := &Evaluator{
-		ExactMember: make([]swim.Member, 0),
-		Swimmer:     make(map[string]*swim.SWIM),
-		MsgEndpoint: make(map[string]*swim.EvaluatorMessageEndpoint),
-		lastID:      0,
-		nodeInfoCur: 0,
-		processLock: sync.Mutex{},
-	}
-	go func() {
-		for {
-			ev.processLock.Lock()
-			_, avgProb := processMemberStatus(ev.ExactMember, ev.Swimmer, ev.nodeInfoCur)
-			fmt.Println("cur avg : " + fmt.Sprintf("%.3f", avgProb))
-			ev.processLock.Unlock()
-			time.Sleep(50 * time.Millisecond)
-		}
-	}()
-	ev.processLock.Lock()
-	for i := 0; i < 500; i++ {
-
-		ev.lastID++
-		tcpPort := evaluator.GetAvailablePort(20000)
-		udpPort := tcpPort
-		id := strconv.Itoa(ev.lastID)
-
-		s, msgEndpoint := SetupSwim("127.0.0.1", tcpPort, udpPort, id)
-		ev.Swimmer[id] = s
-		ev.MsgEndpoint[id] = msgEndpoint
-		ev.ExactMember = append(ev.ExactMember, *s.GetMyInfo())
-		go s.Start()
-		time.Sleep(10 * time.Millisecond)
-	}
-	ev.processLock.Unlock()
-
-	time.Sleep(time.Second)
-	if dstSwimmer, ok := ev.Swimmer["1"]; ok {
-		dstInfo := dstSwimmer.GetMyInfo()
-		for _, srcSwimmer := range ev.Swimmer {
-			if srcSwimmer.GetMyInfo().ID == dstInfo.ID {
-				continue
-			}
-			_ = srcSwimmer.Join([]string{dstInfo.TCPAddress()})
-		}
-	}
-	time.Sleep(15 * time.Second)
-	removeId := "4"
-	if swimmer, ok := ev.Swimmer[removeId]; ok {
-		if !swimmer.IsRun() {
-
-		}
-		swimmer.ShutDown()
-		for idx, mem := range ev.ExactMember {
-			if mem.ID.ID == removeId {
-				ev.ExactMember = append(ev.ExactMember[:idx], ev.ExactMember[idx+1:]...)
-
-			}
-		}
-
-	}
-}
 
 func main() {
 	iLogger.EnableStd(false)
-	go http.ListenAndServe("localhost:6060", nil)
-	ev := &Evaluator{
-		ExactMember: make([]swim.Member, 0),
-		Swimmer:     make(map[string]*swim.SWIM),
-		MsgEndpoint: make(map[string]*swim.EvaluatorMessageEndpoint),
-		lastID:      0,
-		cmdLog:      widgets.NewList(),
-		nodeInfoCur: 0,
-		processLock: sync.Mutex{},
+	//go http.ListenAndServe("localhost:6060", nil)
+
+	vis,err := evaluator.NewVisualizer()
+	if err !=nil{
+		return
 	}
+	defer vis.Shutdown()
 
+	worker := evaluator.NewWorker()
+	ev := evaluator.NewEvaluator()
 
-	if err := ui.Init(); err != nil {
-		iLogger.Fatalf(nil, "failed to initialize termui: %v", err)
-	}
-	defer ui.Close()
-	sparkData := []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,}
-	sl1 := cui.NewSparkline()
-	sl1.Title = "In"
-	sl1.Data = sparkData
-	sl1.LineColor = ui.ColorRed
-	sl1.MaxVal = float64(8)
-
-	sl2 := cui.NewSparkline()
-	sl2.Title = "Out"
-	sl2.Data = sparkData
-	sl2.LineColor = ui.ColorMagenta
-	sl2.MaxVal = float64(8)
-
-	slg1 := cui.NewSparklineGroup(sl1, sl2)
-	slg1.Title = "Avg network load"
-	slg1.TitleStyle.Fg = ui.ColorCyan
-	slg1.SetRect(62, 0, 82, 6)
-
-	listData := []string{
-		"<total node range>",
-		"1~1000",
-		"<dead node list>",
-		"too long item data how to handle it",
-		"<dead num>",
-		"24",
-	}
-
-	l := widgets.NewList()
-	l.Title = "Cur Node Info"
-	l.TitleStyle.Fg = ui.ColorCyan
-	l.Rows = []string{"", "", "", "", ""}
-	l.SetRect(62, 8, 82, 16)
-
-	nodeInfo := cui.NewNodeStatParagraph()
-	nodeInfo.SetRect(0, 0, 62, 15)
-	nodeInfo.Text = fmt.Sprintf("%4dR%4dG%4dB%4dM%4dC%4dW%4dY%4dY%4dY%4dY%4dY%4dY", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 1223)
-
-	infoExplain := cui.NewNodeStatParagraph()
-	infoExplain.SetRect(0, 15, 62, 16)
-	infoExplain.Border = false
-	infoExplain.Text = "G:100 B:~95 C:~90 Y:~85 M:~80 R:80~ W:Dead"
-
-	ev.cmdLog.Title = "command log"
-	ev.cmdLog.TitleStyle.Fg = ui.ColorCyan
-	ev.cmdLog.Rows = []string{"", "", "", "", ""}
-	ev.cmdLog.SetRect(0, 16, 82, 23)
-
-	tb := cui.NewTextBox()
-	tb.SetRect(0, 23, 82, 26)
-	tb.Title = "command"
-	tb.TitleStyle.Fg = ui.ColorCyan
-
-	g := widgets.NewGauge()
-	g.Title = "Last Data Cover Rate"
-	g.Percent = 0
-	g.SetRect(82, 0, 110, 3)
-	g.BarColor = ui.ColorRed
-	g.BorderStyle.Fg = ui.ColorWhite
-	g.TitleStyle.Fg = ui.ColorCyan
-
-	g2 := widgets.NewGauge()
-	g2.Title = "Avg Node Sync Rate"
-	g2.Percent = 10
-	g2.SetRect(82, 3, 110, 6)
-	g2.BarColor = ui.ColorRed
-	g2.BorderStyle.Fg = ui.ColorWhite
-	g2.TitleStyle.Fg = ui.ColorCyan
-
-	g3 := widgets.NewGauge()
-	g3.Title = "Custom Command Gauge"
-	g3.Percent = 0
-	g3.SetRect(82, 6, 110, 9)
-	g3.BarColor = ui.ColorRed
-	g3.BorderStyle.Fg = ui.ColorWhite
-	g3.TitleStyle.Fg = ui.ColorCyan
-
-	recentData := widgets.NewList()
-	recentData.Title = "Recent change know"
-	recentData.TitleStyle.Fg = ui.ColorCyan
-	recentData.Rows = listData
-	recentData.SetRect(82, 9, 160, 26)
-
-	ui.Render(nodeInfo, tb, slg1, l, infoExplain, ev.cmdLog, g, g2, g3, recentData)
 	uiEvents := ui.PollEvents()
-
-
 	go func() {
 		tick := 0
 		for {
@@ -257,8 +92,7 @@ func main() {
 				tb.InsertText(" ")
 				break
 			case "<Enter>":
-				log := ev.processCommand(tb.GetRawText())
-				ev.AppendLog(log)
+				//ev.c(tb.GetRawText())
 				tb.ClearText()
 				break
 			default:
@@ -274,140 +108,7 @@ func main() {
 	}
 
 }
-func (e *Evaluator) processCommand(cmd string) string {
-	e.processLock.Lock()
-	defer e.processLock.Unlock()
-	cmdList := strings.Split(cmd, " ")
-	if len(cmdList) < 1 {
-		return "you have to input cmd"
-	}
-	cmdDomain := cmdList[0]
-	switch cmdDomain {
-	case "create":
-		if len(cmdList) < 2 {
-			return "you have to input create node num. [ex : create 5]"
-		}
 
-		num, err := strconv.Atoi(cmdList[1])
-		if err != nil {
-			return "you have to input create node number, not " + cmdList[1]
-		}
-		for i := 0; i < num; i++ {
-
-			e.lastID++
-			tcpPort := evaluator.GetAvailablePort(20000)
-			udpPort := tcpPort
-			id := strconv.Itoa(e.lastID)
-
-			s, msgEndpoint := SetupSwim("127.0.0.1", tcpPort, udpPort, id)
-			e.Swimmer[id] = s
-			e.MsgEndpoint[id] = msgEndpoint
-			e.ExactMember = append(e.ExactMember, *s.GetMyInfo())
-			go s.Start()
-			time.Sleep(10 * time.Millisecond)
-		}
-		return "successfully create nodes " + strconv.Itoa(num)
-	case "connect":
-		if len(cmdList) < 3 {
-			return "you have to input src, dst [ex : connect all 2, connect 2 6, connect {src} {dst}]"
-		}
-
-		src := cmdList[1]
-		dst := cmdList[2]
-
-		if src == "all" {
-			if dst == "all" {
-				return "all to all connect is not available now"
-			}
-			if dstSwimmer, ok := e.Swimmer[dst]; ok {
-				dstInfo := dstSwimmer.GetMyInfo()
-				for _, srcSwimmer := range e.Swimmer {
-					if srcSwimmer.GetMyInfo().ID == dstInfo.ID {
-						continue
-					}
-					_ = srcSwimmer.Join([]string{dstInfo.TCPAddress()})
-				}
-			} else {
-				return "input swim dst id is invalid. input : " + dst
-			}
-			return "successfully join " + src + " to " + dst
-		}
-		if srcSwimmer, ok := e.Swimmer[src]; ok {
-			if dstSwimmer, ok := e.Swimmer[dst]; ok {
-				dstInfo := dstSwimmer.GetMyInfo()
-				_ = srcSwimmer.Join([]string{dstInfo.TCPAddress()})
-				return "successfully join " + src + " to " + dst
-			} else {
-				return "input swim dst id is invalid. input : " + dst
-			}
-		} else {
-			return "input swim src id is invalid. input : " + src
-		}
-	case "delete", "remove":
-		if len(cmdList) < 2 {
-			return "you have to input id to remove [ex : remove 2, delete 6]"
-		}
-		id := cmdList[1]
-		if swimmer, ok := e.Swimmer[id]; ok {
-			if !swimmer.IsRun() {
-				return "that swimmer is already die..."
-			}
-			swimmer.ShutDown()
-			for idx, mem := range e.ExactMember {
-				if mem.ID.ID == id {
-					e.ExactMember = append(e.ExactMember[:idx], e.ExactMember[idx+1:]...)
-					return "successfully remove swimmer : " + id
-				}
-			}
-			return "successfully remove swimmer : " + id
-		} else {
-			return "there is no swimmer : " + id
-		}
-	default:
-		return "invalid cmd : " + cmdDomain
-	}
-}
-
-func SetupSwim(ip string, udpPort int, tcpPort int, id string) (*swim.SWIM, *swim.EvaluatorMessageEndpoint) {
-	swimConfig := swim.Config{
-		MaxlocalCount: 5,
-		MaxNsaCounter: 5,
-		T:             800,
-		AckTimeOut:    100,
-		K:             2,
-		BindAddress:   ip,
-		BindPort:      udpPort,
-	}
-	suspicionConfig := swim.SuspicionConfig{
-		K:        3,
-		MinParam: 5,
-		MaxParam: 1,
-	}
-	messageEndpointConfig := swim.MessageEndpointConfig{
-		EncryptionEnabled:       false,
-		SendTimeout:             100 * time.Millisecond,
-		CallbackCollectInterval: time.Minute,
-	}
-
-	tcpEndpointconfig := swim.TCPMessageEndpointConfig{
-		EncryptionEnabled: false,
-		TCPTimeout:        20 * time.Second,
-		IP:                ip,
-		Port:              tcpPort,
-		MyId:              swim.MemberID{ID: id},
-	}
-	swimObj, msgEndpoint := swim.NewSwimForEvaluate(&swimConfig, &suspicionConfig, messageEndpointConfig, tcpEndpointconfig, &swim.Member{
-		ID:               swim.MemberID{ID: id},
-		Addr:             net.ParseIP(ip),
-		UDPPort:          uint16(udpPort),
-		TCPPort:          uint16(tcpPort),
-		Status:           swim.Alive,
-		LastStatusChange: time.Now(),
-		Incarnation:      0,
-	})
-
-	return swimObj, msgEndpoint
-}
 
 func processInOutPacketSparkle(swimmers map[string]*swim.EvaluatorMessageEndpoint) (float64, float64) {
 
@@ -427,15 +128,9 @@ func processInOutPacketSparkle(swimmers map[string]*swim.EvaluatorMessageEndpoin
 	return avgInPacket, avgOutPacket
 }
 
-type IdProbStruct struct {
-	id    string
-	prob  float64
-	isRun bool
-}
-
 func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.SWIM, nodeInfoCur int) (string, float64) {
 
-	dataList := make([]IdProbStruct, 0)
+	dataList := make([]evaluator.IdProbStruct, 0)
 	totalProb := float64(0)
 
 	for _, swimmer := range swimmers {
@@ -443,13 +138,13 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 		prob := compareMemberList(exactMembers, memberMap.GetMembers())
 
 		totalProb += prob
-		dataList = append(dataList, IdProbStruct{
-			id:    swimmer.GetMyInfo().ID.ID,
-			prob:  prob,
-			isRun: swimmer.IsRun(),
+		dataList = append(dataList, evaluator.IdProbStruct{
+			Id:    swimmer.GetMyInfo().ID.ID,
+			Prob:  prob,
+			IsRun: swimmer.IsRun(),
 		})
 	}
-	memLen := len(swimmers)
+	memLen := len(dataList)
 	if memLen == 0 {
 		memLen = 1
 	}
@@ -461,32 +156,37 @@ func processMemberStatus(exactMembers []swim.Member, swimmers map[string]*swim.S
 		avgProb = float64(100)
 	}
 	sort.Slice(dataList[:], func(i, j int) bool {
-		return dataList[i].id < dataList[j].id
+		iInt, err := strconv.Atoi(dataList[i].Id)
+		jInt, err2 := strconv.Atoi(dataList[j].Id)
+		if err != nil || err2 != nil {
+			return dataList[i].Id < dataList[j].Id
+		}
+		return iInt < jInt
 	})
 	visualizeString := ""
 	counter := 0
 	for _, oneData := range dataList {
 		switch {
-		case !oneData.isRun:
-			visualizeString += fmt.Sprintf("%4sW", oneData.id)
+		case !oneData.IsRun:
+			visualizeString += fmt.Sprintf("%4sW", oneData.Id)
 			break
-		case oneData.prob >= float64(100):
-			visualizeString += fmt.Sprintf("%4sG", oneData.id)
+		case oneData.Prob >= float64(100):
+			visualizeString += fmt.Sprintf("%4sG", oneData.Id)
 			break
-		case oneData.prob >= float64(95):
-			visualizeString += fmt.Sprintf("%4sB", oneData.id)
+		case oneData.Prob >= float64(95):
+			visualizeString += fmt.Sprintf("%4sB", oneData.Id)
 			break
-		case oneData.prob >= float64(90):
-			visualizeString += fmt.Sprintf("%4sC", oneData.id)
+		case oneData.Prob >= float64(90):
+			visualizeString += fmt.Sprintf("%4sC", oneData.Id)
 			break
-		case oneData.prob >= float64(85):
-			visualizeString += fmt.Sprintf("%4sY", oneData.id)
+		case oneData.Prob >= float64(85):
+			visualizeString += fmt.Sprintf("%4sY", oneData.Id)
 			break
-		case oneData.prob >= float64(80):
-			visualizeString += fmt.Sprintf("%4sM", oneData.id)
+		case oneData.Prob >= float64(80):
+			visualizeString += fmt.Sprintf("%4sM", oneData.Id)
 			break
-		case oneData.prob < float64(80):
-			visualizeString += fmt.Sprintf("%4sR", oneData.id)
+		case oneData.Prob < float64(80):
+			visualizeString += fmt.Sprintf("%4sR", oneData.Id)
 			break
 		default:
 			visualizeString += ""
@@ -547,7 +247,9 @@ func isInSameDataMember(checkMember swim.Member, memberList []swim.Member) bool 
 	return false
 
 }
+func (e *Evaluator) StartScheduler() {
 
+}
 func (e *Evaluator) AppendLog(log string) {
 	e.cmdLog.Rows = append(e.cmdLog.Rows[1:], log)
 	e.Render(e.cmdLog)
@@ -555,4 +257,104 @@ func (e *Evaluator) AppendLog(log string) {
 
 func (e *Evaluator) Render(item ui.Drawable) {
 	ui.Render(item)
+}
+
+func (e *Evaluator) processCmd(ch chan string) {
+	for {
+		cmd := <-ch
+		cmdList := strings.Split(cmd, " ")
+		if len(cmdList) < 1 {
+			e.AppendLog("you have to input cmd")
+		}
+		cmdDomain := cmdList[0]
+		switch cmdDomain {
+		case "create":
+			if len(cmdList) < 2 {
+				e.AppendLog("you have to input create node num. [ex : create 5]")
+			}
+
+			num, err := strconv.Atoi(cmdList[1])
+			if err != nil {
+				e.AppendLog("you have to input create node number, not " + cmdList[1])
+			}
+			for i := 0; i < num; i++ {
+
+				e.processLock.Lock()
+				e.lastID++
+				tcpPort := evaluator.GetAvailablePort(20000)
+				udpPort := tcpPort
+				id := strconv.Itoa(e.lastID)
+
+				s, msgEndpoint := SetupSwim("127.0.0.1", tcpPort, udpPort, id)
+				e.Swimmer[id] = s
+				e.MsgEndpoint[id] = msgEndpoint
+				e.ExactMember = append(e.ExactMember, *s.GetMyInfo())
+				go s.Start()
+				e.processLock.Unlock()
+				time.Sleep(10 * time.Millisecond)
+			}
+			e.AppendLog("successfully create nodes " + strconv.Itoa(num))
+		case "connect":
+			if len(cmdList) < 3 {
+				e.AppendLog("you have to input src, dst [ex : connect all 2, connect 2 6, connect {src} {dst}]")
+			}
+
+			src := cmdList[1]
+			dst := cmdList[2]
+			e.processLock.Lock()
+			defer e.processLock.Unlock()
+			if src == "all" {
+				if dst == "all" {
+					e.AppendLog("all to all connect is not available now")
+				}
+				if dstSwimmer, ok := e.Swimmer[dst]; ok {
+					dstInfo := dstSwimmer.GetMyInfo()
+					for _, srcSwimmer := range e.Swimmer {
+						if srcSwimmer.GetMyInfo().ID == dstInfo.ID {
+							continue
+						}
+						_ = srcSwimmer.Join([]string{dstInfo.TCPAddress()})
+					}
+				} else {
+					e.AppendLog("input swim dst id is invalid. input : " + dst)
+				}
+				e.AppendLog("successfully join " + src + " to " + dst)
+			}
+			if srcSwimmer, ok := e.Swimmer[src]; ok {
+				if dstSwimmer, ok := e.Swimmer[dst]; ok {
+					dstInfo := dstSwimmer.GetMyInfo()
+					_ = srcSwimmer.Join([]string{dstInfo.TCPAddress()})
+					e.AppendLog("successfully join " + src + " to " + dst)
+				} else {
+					e.AppendLog("input swim dst id is invalid. input : " + dst)
+				}
+			} else {
+				e.AppendLog("input swim src id is invalid. input : " + src)
+			}
+		case "delete", "remove":
+			if len(cmdList) < 2 {
+				e.AppendLog("you have to input id to remove [ex : remove 2, delete 6]")
+			}
+			id := cmdList[1]
+			e.processLock.Lock()
+			defer e.processLock.Unlock()
+			if swimmer, ok := e.Swimmer[id]; ok {
+				if !swimmer.IsRun() {
+					e.AppendLog("that swimmer is already die...")
+				}
+				swimmer.ShutDown()
+				for idx, mem := range e.ExactMember {
+					if mem.ID.ID == id {
+						e.ExactMember = append(e.ExactMember[:idx], e.ExactMember[idx+1:]...)
+						e.AppendLog("successfully remove swimmer : " + id)
+					}
+				}
+				e.AppendLog("successfully remove swimmer : " + id)
+			} else {
+				e.AppendLog("there is no swimmer : " + id)
+			}
+		default:
+			e.AppendLog("invalid cmd : " + cmdDomain)
+		}
+	}
 }

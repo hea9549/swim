@@ -21,9 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DE-labtory/iLogger"
 	"github.com/DE-labtory/swim/pb"
 	"github.com/gogo/protobuf/proto"
-	"github.com/DE-labtory/iLogger"
 )
 
 var ErrSendTimeout = errors.New("Error send timeout")
@@ -312,6 +312,7 @@ type EvaluatorMessageEndpoint struct {
 	packetInCounter      int
 	packetOutCounterLock sync.Mutex
 	packetOutCounter     int
+	packetLossRate       float64
 	quit                 chan struct{}
 }
 
@@ -364,7 +365,6 @@ func (m *EvaluatorMessageEndpoint) Listen() {
 	}
 }
 
-
 // ProcessPacket process given packet, this procedure may include
 // decrypting data and converting it to message
 func (m *EvaluatorMessageEndpoint) processPacket(packet Packet) (pb.Message, error) {
@@ -379,7 +379,6 @@ func (m *EvaluatorMessageEndpoint) processPacket(packet Packet) (pb.Message, err
 
 	return *msg, nil
 }
-
 
 // with given message handleMessage determine which logic should be executed
 // based on the message type. Additionally handleMessage can call MemberDelegater

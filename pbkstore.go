@@ -74,11 +74,13 @@ func (p *PriorityMbrStatsMsgStore) Len() int {
 func (p *PriorityMbrStatsMsgStore) Push(msg pb.MbrStatsMsg) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	if idx := p.searchByStatMsgId(msg.Id); idx != -1 {
+		heap.Remove(&p.q, idx)
+	}
 	item := &Item{
 		value:    msg,
 		priority: InitialPriority,
 	}
-
 
 	heap.Push(&p.q, item)
 }
@@ -121,9 +123,12 @@ func (p *PriorityMbrStatsMsgStore) IsEmpty() bool {
 	return false
 }
 
-func (p *PriorityMbrStatsMsgStore) SearchByStatMsgId(id string) int {
-	for idx,item := range p.q{
-		item
-		msg,ok := item.(pb.MbrStatsMsg)
+func (p *PriorityMbrStatsMsgStore) searchByStatMsgId(id string) int {
+	for idx, item := range p.q {
+		msg, ok := item.value.(pb.MbrStatsMsg)
+		if ok && msg.Id == id {
+			return idx
+		}
 	}
+	return -1
 }
