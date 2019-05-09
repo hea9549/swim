@@ -493,7 +493,7 @@ func (s *SWIM) probe(member Member, curInterval time.Duration) {
 			return nil, nil
 		}
 		resp := NewTaskRunner(task, ctx).Start()
-		end <- ProbeResponse{err: resp.Err}
+		SafeProbeResponseSend(end,ProbeResponse{err: resp.Err})
 	}()
 
 	select {
@@ -561,25 +561,25 @@ func (s *SWIM) indirectProbe(target *Member) error {
 			resp := NewTaskRunner(task, ctx).Start()
 			if resp.Err != nil {
 				iLogger.Error(nil,"error indirect ping :"+s.member.ID.ID+"->"+m.ID.ID)
-				done <- IndProbeResponse{
+				SafeIndProbeResponseSend(done,IndProbeResponse{
 					err: resp.Err,
 					msg: pb.Message{},
-				}
+				})
 				return
 			}
 
 			msg, ok := resp.Payload.(pb.Message)
 			if !ok {
-				done <- IndProbeResponse{
+				SafeIndProbeResponseSend(done,IndProbeResponse{
 					err: ErrInvalidPayloadType,
 					msg: pb.Message{},
-				}
+				})
 				return
 			}
-			done <- IndProbeResponse{
+			SafeIndProbeResponseSend(done,IndProbeResponse{
 				err: nil,
 				msg: msg,
-			}
+			})
 		}(m)
 	}
 

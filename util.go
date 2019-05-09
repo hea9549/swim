@@ -98,3 +98,26 @@ func ParseHostPort(address string) (net.IP, uint16, error) {
 
 	return host, uint16(port), nil
 }
+
+func SafeProbeResponseSend(ch chan ProbeResponse, value ProbeResponse) (closed bool) {
+	defer func() {
+		if recover() != nil {
+			closed = true
+		}
+	}()
+
+	ch <- value  // panic if ch is closed
+	return false // <=> closed = false; return
+}
+
+
+func SafeIndProbeResponseSend(ch chan IndProbeResponse, value IndProbeResponse) (closed bool) {
+	defer func() {
+		if recover() != nil {
+			closed = true
+		}
+	}()
+
+	ch <- value  // panic if ch is closed
+	return false // <=> closed = false; return
+}

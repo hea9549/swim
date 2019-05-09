@@ -71,3 +71,4 @@ func (pq *PriorityQueue) update(item *Item, value interface{}, priority int) {
 	item.priority = priority
 	heap.Fix(pq, item.index)
 }
+

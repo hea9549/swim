@@ -2,19 +2,21 @@ package main
 
 import (
 	"fmt"
-	"github.com/DE-labtory/iLogger"
 	"github.com/DE-labtory/swim"
-	"github.com/DE-labtory/swim/cui"
 	"github.com/DE-labtory/swim/evaluator"
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
-	"math"
 	"net"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	_ "net/http/pprof"
+	"github.com/DE-labtory/iLogger"
+	"net/http"
+	"github.com/DE-labtory/swim/cui"
+	"math"
 )
 
 type Evaluator struct {
@@ -27,9 +29,72 @@ type Evaluator struct {
 	processLock sync.Mutex
 }
 
+func testFmt() {
+	iLogger.EnableStd(false)
+	ev := &Evaluator{
+		ExactMember: make([]swim.Member, 0),
+		Swimmer:     make(map[string]*swim.SWIM),
+		MsgEndpoint: make(map[string]*swim.EvaluatorMessageEndpoint),
+		lastID:      0,
+		nodeInfoCur: 0,
+		processLock: sync.Mutex{},
+	}
+	go func() {
+		for {
+			ev.processLock.Lock()
+			_, avgProb := processMemberStatus(ev.ExactMember, ev.Swimmer, ev.nodeInfoCur)
+			fmt.Println("cur avg : " + fmt.Sprintf("%.3f", avgProb))
+			ev.processLock.Unlock()
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	ev.processLock.Lock()
+	for i := 0; i < 500; i++ {
+
+		ev.lastID++
+		tcpPort := evaluator.GetAvailablePort(20000)
+		udpPort := tcpPort
+		id := strconv.Itoa(ev.lastID)
+
+		s, msgEndpoint := SetupSwim("127.0.0.1", tcpPort, udpPort, id)
+		ev.Swimmer[id] = s
+		ev.MsgEndpoint[id] = msgEndpoint
+		ev.ExactMember = append(ev.ExactMember, *s.GetMyInfo())
+		go s.Start()
+		time.Sleep(10 * time.Millisecond)
+	}
+	ev.processLock.Unlock()
+
+	time.Sleep(time.Second)
+	if dstSwimmer, ok := ev.Swimmer["1"]; ok {
+		dstInfo := dstSwimmer.GetMyInfo()
+		for _, srcSwimmer := range ev.Swimmer {
+			if srcSwimmer.GetMyInfo().ID == dstInfo.ID {
+				continue
+			}
+			_ = srcSwimmer.Join([]string{dstInfo.TCPAddress()})
+		}
+	}
+	time.Sleep(15 * time.Second)
+	removeId := "4"
+	if swimmer, ok := ev.Swimmer[removeId]; ok {
+		if !swimmer.IsRun() {
+
+		}
+		swimmer.ShutDown()
+		for idx, mem := range ev.ExactMember {
+			if mem.ID.ID == removeId {
+				ev.ExactMember = append(ev.ExactMember[:idx], ev.ExactMember[idx+1:]...)
+
+			}
+		}
+
+	}
+}
+
 func main() {
 	iLogger.EnableStd(false)
-
+	go http.ListenAndServe("localhost:6060", nil)
 	ev := &Evaluator{
 		ExactMember: make([]swim.Member, 0),
 		Swimmer:     make(map[string]*swim.SWIM),
@@ -159,33 +224,7 @@ func main() {
 				nodeInfo.Text = " "
 				ev.Render(nodeInfo)
 			}
-			if len(ev.Swimmer) > 5 {
-				swimmers := make([]*swim.SWIM, 0)
-				swimmers = append(swimmers, ev.Swimmer["1"], ev.Swimmer["2"], ev.Swimmer["3"], ev.Swimmer["4"], ev.Swimmer["5"])
-				for _, swimmer := range swimmers {
-					mm := swimmer.GetMemberMap()
-					printStr := swimmer.GetMyInfo().ID.ID + " : "
-					aliveCounter := 0
-					suspectCounter := 0
-					deadCounter := 0
-					deadList := make([]string, 0)
-					for _, m := range mm.GetMembers() {
-						switch m.Status {
-						case swim.Alive:
-							aliveCounter++
-						case swim.Suspected:
-							suspectCounter++
-						case swim.Dead:
-							deadCounter++
-							deadList = append(deadList, m.ID.ID)
-						}
-					}
-					deadStr := strings.Join(deadList[:], ",")
-					printStr += fmt.Sprintf("a:%d,s:%d,d:%d--list:%s", aliveCounter, suspectCounter, deadCounter, deadStr)
 
-					ev.AppendLog(printStr)
-				}
-			}
 			ev.processLock.Unlock()
 		}
 	}()
@@ -484,7 +523,7 @@ func compareMemberList(expected []swim.Member, data []swim.Member) float64 {
 	}
 
 	for _, oneMember := range data {
-		if !isInSameDataMember(oneMember, expected) {
+		if !isInSameDataMember(oneMember, expected) && oneMember.Status != swim.Dead {
 			miss++
 		}
 	}

@@ -74,7 +74,8 @@ func (r *responseHandler) handle(msg pb.Message) {
 	cb, exist := r.callbacks[seq]
 
 	if exist == false {
-		iLogger.Error(nil, "Panic, no matching callback function")
+		iLogger.Error(nil, "err, no matching callback function")
+		return
 	}
 
 	cb.fn(msg)
@@ -91,6 +92,14 @@ func (r *responseHandler) hasCallback(seq string) bool {
 		}
 	}
 	return false
+}
+
+func (r *responseHandler) removeCallback(seq string) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if _, ok := r.callbacks[seq]; ok {
+		delete(r.callbacks, seq)
+	}
 }
 
 // collectCallback every time callbackCollectInterval expired clean up
@@ -260,6 +269,7 @@ func (m *DefaultMessageEndpoint) SyncSend(addr string, msg pb.Message) (pb.Messa
 	case msg := <-onSucc:
 		return msg, nil
 	case <-T.C:
+		m.resHandler.removeCallback(msg.Id)
 		return pb.Message{}, ErrSendTimeout
 	}
 
@@ -354,6 +364,7 @@ func (m *EvaluatorMessageEndpoint) Listen() {
 	}
 }
 
+
 // ProcessPacket process given packet, this procedure may include
 // decrypting data and converting it to message
 func (m *EvaluatorMessageEndpoint) processPacket(packet Packet) (pb.Message, error) {
@@ -368,6 +379,7 @@ func (m *EvaluatorMessageEndpoint) processPacket(packet Packet) (pb.Message, err
 
 	return *msg, nil
 }
+
 
 // with given message handleMessage determine which logic should be executed
 // based on the message type. Additionally handleMessage can call MemberDelegater
@@ -424,10 +436,19 @@ func (m *EvaluatorMessageEndpoint) SyncSend(addr string, msg pb.Message) (pb.Mes
 	case msg := <-onSucc:
 		return msg, nil
 	case <-T.C:
+		m.resHandler.removeCallback(msg.Id)
 		return pb.Message{}, ErrSendTimeout
 	}
 
 	return pb.Message{}, ErrUnreachable
+}
+
+func (m *EvaluatorMessageEndpoint) Shutdown() {
+	// close transport first
+	m.transport.Shutdown()
+
+	// then close message endpoint
+	m.quit <- struct{}{}
 }
 
 // ExchangeMessage asynchronously send message to member of addr, don't wait until response come back,
@@ -451,14 +472,6 @@ func (m *EvaluatorMessageEndpoint) Send(addr string, msg pb.Message) error {
 	}()
 
 	return nil
-}
-
-func (m *EvaluatorMessageEndpoint) Shutdown() {
-	// close transport first
-	m.transport.Shutdown()
-
-	// then close message endpoint
-	m.quit <- struct{}{}
 }
 
 func (m *EvaluatorMessageEndpoint) addInPacketCounter() {
