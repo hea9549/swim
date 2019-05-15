@@ -17,7 +17,10 @@
 package swim
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -312,7 +315,9 @@ type EvaluatorMessageEndpoint struct {
 	packetInCounter      int
 	packetOutCounterLock sync.Mutex
 	packetOutCounter     int
-	packetLossRate       float64
+	PacketLossRate       float64
+	disconnectAddrList   []string
+	disconnectAddrLock   sync.RWMutex
 	quit                 chan struct{}
 }
 
@@ -418,12 +423,21 @@ func (m *EvaluatorMessageEndpoint) SyncSend(addr string, msg pb.Message) (pb.Mes
 	})
 
 	// send the message
-	_, err = m.transport.WriteTo(d, addr)
-	if err != nil {
-		iLogger.Error(nil, err.Error())
-		return pb.Message{}, err
+	b := []byte(time.Now().String()+msg.GetId()+addr+time.Now().String())
+	seed := int64(0)
+	buf := bytes.NewBuffer(b)
+	err = binary.Read(buf, binary.LittleEndian, &seed)
+	if err != nil{
+		panic(err.Error())
 	}
-
+	rand.Seed(seed)
+	if rand.Float64() > m.PacketLossRate && !contains(m.GetDisconnectAddr(),addr){
+		_, err = m.transport.WriteTo(d, addr)
+		if err != nil {
+			iLogger.Error(nil, err.Error())
+			return pb.Message{}, err
+		}
+	}
 	go func() {
 		m.addOutPacketCounter()
 	}()
@@ -460,10 +474,21 @@ func (m *EvaluatorMessageEndpoint) Send(addr string, msg pb.Message) error {
 	}
 
 	// send the message
-	_, err = m.transport.WriteTo(d, addr)
-	if err != nil {
-		iLogger.Info(nil, err.Error())
-		return err
+	b := []byte(time.Now().String()+msg.GetId()+addr+time.Now().String())
+	seed := int64(0)
+	buf := bytes.NewBuffer(b)
+	err = binary.Read(buf, binary.LittleEndian, &seed)
+	if err != nil{
+		panic(err.Error())
+	}
+	rand.Seed(seed)
+
+	if rand.Float64() > m.PacketLossRate && !contains(m.GetDisconnectAddr(),addr) {
+		_, err = m.transport.WriteTo(d, addr)
+		if err != nil {
+			iLogger.Info(nil, err.Error())
+			return err
+		}
 	}
 
 	go func() {
@@ -531,5 +556,38 @@ func (m *EvaluatorMessageEndpoint) PopOutPacketCounter() int {
 	d := m.packetOutCounter
 	m.packetOutCounter = 0
 	return d
+}
 
+func (m *EvaluatorMessageEndpoint) AddDisconnectAddr(addr string) {
+	m.disconnectAddrLock.Lock()
+	defer m.disconnectAddrLock.Unlock()
+
+	m.disconnectAddrList = append(m.disconnectAddrList,addr)
+}
+
+func (m *EvaluatorMessageEndpoint) GetDisconnectAddr() []string {
+	m.disconnectAddrLock.RLock()
+	defer m.disconnectAddrLock.RUnlock()
+	return m.disconnectAddrList
+}
+
+func (m *EvaluatorMessageEndpoint) RemoveDisconnectAddr(addr string) {
+	m.disconnectAddrLock.Lock()
+	defer m.disconnectAddrLock.Unlock()
+
+	for idx,dAddr := range m.disconnectAddrList{
+		if dAddr == addr{
+			m.disconnectAddrList = append(m.disconnectAddrList[:idx],m.disconnectAddrList[idx+1:]...)
+			return
+		}
+	}
+}
+
+func contains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
 }

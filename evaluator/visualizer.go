@@ -17,10 +17,13 @@
 package evaluator
 
 import (
-	"github.com/DE-labtory/swim"
+	"fmt"
 	"github.com/DE-labtory/swim/cui"
 	ui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 type currentInfo struct {
@@ -29,16 +32,19 @@ type currentInfo struct {
 	DeadNodeNum    int
 }
 type selectedInfo struct {
+	ID              string
 	LiveNodeNum     int
 	SuspectNodeNum  int
 	DeadNodeNum     int
-	DeadNodeList    []swim.MemberID
-	SuspectNodeList []swim.MemberID
+	DeadNodeList    []string
+	SuspectNodeList []string
+	Incarnation     int
+	AwarenessScore  int
 }
 
 type networkLoadInfo struct {
-	avgInMsg  int
-	avgOutMsg int
+	avgInMsg  float64
+	avgOutMsg float64
 }
 
 type IdProbStruct struct {
@@ -46,14 +52,21 @@ type IdProbStruct struct {
 	Prob  float64
 	IsRun bool
 }
+type CursorEvent int
+
+const (
+	UP   CursorEvent = 1
+	DOWN CursorEvent = 2
+)
 
 type Visualizer struct {
 	UpdateMemberDataChan       chan []IdProbStruct
-	UpdateMemberViewCursorChan chan int
+	UpdateMemberViewCursorChan chan CursorEvent
 	UpdateGaugeViewChan        chan int
 	UpdateCurrentInfoViewChan  chan currentInfo
 	UpdateSelectedInfoViewChan chan selectedInfo
 	AppendNetworkLoadChan      chan networkLoadInfo
+	AppendLogChan              chan string
 	UpdateTimePeriod           chan int
 
 	CmdLog                *widgets.List
@@ -67,6 +80,10 @@ type Visualizer struct {
 	AvgNodeSyncGauge      *widgets.Gauge
 	LastDataCoverRate     *widgets.Gauge
 	CustomCmdGauge        *widgets.Gauge
+
+	toStop           bool
+	stopCh           chan interface{}
+	memberViewCursor int
 }
 
 func NewVisualizer() (*Visualizer, error) {
@@ -78,12 +95,14 @@ func NewVisualizer() (*Visualizer, error) {
 
 	vis := &Visualizer{
 		UpdateMemberDataChan:       make(chan []IdProbStruct),
-		UpdateMemberViewCursorChan: make(chan int),
+		UpdateMemberViewCursorChan: make(chan CursorEvent),
 		UpdateGaugeViewChan:        make(chan int),
 		UpdateCurrentInfoViewChan:  make(chan currentInfo),
 		UpdateSelectedInfoViewChan: make(chan selectedInfo),
 		AppendNetworkLoadChan:      make(chan networkLoadInfo),
 		UpdateTimePeriod:           make(chan int),
+		AppendLogChan:              make(chan string),
+		stopCh:                     make(chan interface{}),
 		CmdLog:                     widgets.NewList(),
 		CmdTextBox:                 cui.NewTextBox(),
 		AvgInLoadSparkLine:         cui.NewSparkline(),
@@ -95,6 +114,8 @@ func NewVisualizer() (*Visualizer, error) {
 		AvgNodeSyncGauge:           widgets.NewGauge(),
 		LastDataCoverRate:          widgets.NewGauge(),
 		CustomCmdGauge:             widgets.NewGauge(),
+		toStop:                     false,
+		memberViewCursor:           0,
 	}
 
 	sparkLineInitData := []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,}
@@ -157,14 +178,176 @@ func NewVisualizer() (*Visualizer, error) {
 
 	vis.SelectedNodeInfoView.Title = "Node View"
 	vis.SelectedNodeInfoView.TitleStyle.Fg = ui.ColorCyan
-	vis.SelectedNodeInfoView.Rows = []string{"", "", "", "", "", "",}
+	vis.SelectedNodeInfoView.Rows = []string{"", "", "", "", "", "", "",}
 	vis.SelectedNodeInfoView.SetRect(82, 9, 110, 26)
 
-	ui.Render(vis.CmdLog, vis.CmdTextBox,vis.NetworkLoadSparkGroup, vis.CurNodeInfo,vis.SelectedNodeInfoView,
-		vis.MemberStatusView,vis.AvgNodeSyncGauge, vis.LastDataCoverRate,vis.CustomCmdGauge)
-	return vis,nil
+	ui.Render(vis.CmdLog, vis.CmdTextBox, vis.NetworkLoadSparkGroup, vis.CurNodeInfo, vis.SelectedNodeInfoView,
+		vis.MemberStatusView, vis.AvgNodeSyncGauge, vis.LastDataCoverRate, vis.CustomCmdGauge, infoExplain)
+	return vis, nil
+}
+func (v *Visualizer) Start() {
+	v.toStop = false
+	for {
+		if v.toStop {
+			return
+		}
+		select {
+		case d := <-v.UpdateMemberDataChan:
+			viewStr, avgGuage := getMemberViewData(d, v.memberViewCursor)
+			v.MemberStatusView.Text = viewStr
+			v.AvgNodeSyncGauge.Percent = int(avgGuage)
+			ui.Render(v.MemberStatusView, v.AvgNodeSyncGauge)
+			break
+		case c := <-v.UpdateMemberViewCursorChan:
+			if c == UP {
+				v.memberViewCursor--
+			} else if c == DOWN {
+				v.memberViewCursor++
+			}
+			break
+		case <-v.UpdateGaugeViewChan:
+			// not do yet
+			break
+		case <-v.UpdateCurrentInfoViewChan:
+			break
+		case d := <-v.UpdateSelectedInfoViewChan:
+			v.SelectedNodeInfoView.Rows[0] = "ID : " + d.ID
+			v.SelectedNodeInfoView.Rows[1] = "ALIVE NUM : " + strconv.Itoa(d.LiveNodeNum)
+			v.SelectedNodeInfoView.Rows[2] = "SUSPECT NUM : " + strconv.Itoa(d.SuspectNodeNum)
+			v.SelectedNodeInfoView.Rows[3] = "DEAD NUM : " + strconv.Itoa(d.DeadNodeNum)
+			v.SelectedNodeInfoView.Rows[4] = "SUSPECT : " + strings.Join(d.SuspectNodeList, ",")
+			v.SelectedNodeInfoView.Rows[5] = "DEAD : " + strings.Join(d.DeadNodeList, ",")
+			v.SelectedNodeInfoView.Rows[6] = "INCARNATION : " + strconv.Itoa(d.Incarnation)
+			ui.Render(v.SelectedNodeInfoView)
+			break
+		case d := <-v.AppendNetworkLoadChan:
+			v.NetworkLoadSparkGroup.Sparklines[0].Data = append(v.NetworkLoadSparkGroup.Sparklines[0].Data[1:], d.avgInMsg)
+			v.NetworkLoadSparkGroup.Sparklines[1].Data = append(v.NetworkLoadSparkGroup.Sparklines[1].Data[1:], d.avgOutMsg)
+			ui.Render(v.NetworkLoadSparkGroup)
+			break
+		case <-v.UpdateTimePeriod:
+			break
+		case <-v.stopCh:
+			ui.Close()
+			return
+		case log := <-v.AppendLogChan:
+			v.CmdLog.Rows = append(v.CmdLog.Rows[1:], log)
+			ui.Render(v.CmdLog)
+			break
+		}
+	}
+
+}
+
+func getMemberViewData(dataList []IdProbStruct, cursor int) (string, float64) {
+	totalProb := float64(0)
+
+	sort.Slice(dataList[:], func(i, j int) bool {
+		iInt, err := strconv.Atoi(dataList[i].Id)
+		jInt, err2 := strconv.Atoi(dataList[j].Id)
+		if err != nil || err2 != nil {
+			return dataList[i].Id < dataList[j].Id
+		}
+		return iInt < jInt
+	})
+	visualizeString := ""
+	counter := 0
+	aliveNum := 0
+	for _, oneData := range dataList {
+		aliveNum++
+		switch {
+		case !oneData.IsRun:
+			visualizeString += fmt.Sprintf("%4sW", oneData.Id)
+			aliveNum--
+			break
+		case oneData.Prob >= float64(100):
+			visualizeString += fmt.Sprintf("%4sG", oneData.Id)
+			totalProb += oneData.Prob
+			break
+		case oneData.Prob >= float64(95):
+			visualizeString += fmt.Sprintf("%4sB", oneData.Id)
+			totalProb += oneData.Prob
+			break
+		case oneData.Prob >= float64(90):
+			visualizeString += fmt.Sprintf("%4sC", oneData.Id)
+			totalProb += oneData.Prob
+			break
+		case oneData.Prob >= float64(85):
+			visualizeString += fmt.Sprintf("%4sY", oneData.Id)
+			totalProb += oneData.Prob
+			break
+		case oneData.Prob >= float64(80):
+			visualizeString += fmt.Sprintf("%4sM", oneData.Id)
+			totalProb += oneData.Prob
+			break
+		case oneData.Prob < float64(80):
+			visualizeString += fmt.Sprintf("%4sR", oneData.Id)
+			totalProb += oneData.Prob
+			break
+		default:
+			visualizeString += ""
+		}
+		counter++
+		if counter == 12 {
+			visualizeString += "\n"
+			counter = 0
+		}
+	}
+
+	nodeInfoData := strings.Split(visualizeString, "\n")
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor < len(nodeInfoData) {
+		nodeInfoData = nodeInfoData[cursor:]
+	}
+
+	visualizeString = strings.Join(nodeInfoData[:], "\n")
+	if aliveNum == 0 {
+		aliveNum = 1
+	}
+	avgProb := totalProb / float64(aliveNum)
+	if avgProb < 0 {
+		avgProb = float64(0)
+	}
+	if avgProb > 100 {
+		avgProb = float64(100)
+	}
+	return visualizeString, avgProb
+}
+
+func (v *Visualizer) HandleCmdTextBox(str string) string {
+	returnStr := ""
+	switch str {
+	case "<Backspace>", "<C-<Backspace>>":
+		v.CmdTextBox.Backspace()
+		break
+	case "<Left>":
+		v.CmdTextBox.MoveCursorLeft()
+		break
+	case "<Right>":
+		v.CmdTextBox.MoveCursorRight()
+		break
+	case "<Space>":
+		v.CmdTextBox.InsertText(" ")
+		break
+	case "<Enter>":
+		returnStr = v.CmdTextBox.GetText()
+		v.CmdTextBox.ClearText()
+		break
+	default:
+		if cui.ContainsString(cui.PRINTABLE_KEYS, str) {
+			v.CmdTextBox.InsertText(str)
+		}
+		break
+
+	}
+	ui.Render(v.CmdTextBox)
+	return returnStr
 }
 
 func (v *Visualizer) Shutdown() {
-	ui.Close()
+	v.stopCh <- struct{}{}
+	v.toStop = true
+
 }

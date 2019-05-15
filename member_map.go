@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-		"github.com/DE-labtory/swim/pb"
 	"github.com/DE-labtory/iLogger"
+	"github.com/DE-labtory/swim/pb"
 )
 
 var ErrEmptyMemberID = errors.New("MemberID is empty")
@@ -111,6 +111,8 @@ type Member struct {
 	// got suspicion message, that member can increments incarnation
 	Incarnation uint32
 
+	IncarnationLock sync.RWMutex
+
 	// Suspicion manages the suspect timer and helps to accelerate the timeout
 	// as member self got more independent confirmations that a target member is suspect.
 	Suspicion *Suspicion
@@ -145,6 +147,21 @@ func (m *Member) GetID() MemberID {
 
 func (m *Member) GetIDString() string {
 	return m.ID.ID
+}
+
+func (m *Member) GetIncarnation() uint32 {
+	m.IncarnationLock.RLock()
+	defer m.IncarnationLock.RUnlock()
+	return m.Incarnation
+}
+
+func (m *Member) AddIncarnationAtomic(comparer uint32) uint32 {
+	m.IncarnationLock.Lock()
+	defer m.IncarnationLock.Unlock()
+	if m.Incarnation <= comparer{
+		m.Incarnation = comparer+1
+	}
+	return m.Incarnation
 }
 
 type MemberMap struct {
@@ -217,8 +234,8 @@ func (m *MemberMap) SelectKRandomMemberID(k int, exceptMemberId *MemberID) []Mem
 }
 
 func (m *MemberMap) GetMembers() []Member {
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.lock.RLock()
+	defer m.lock.RUnlock()
 
 	members := make([]Member, 0)
 	for _, member := range m.members {
@@ -364,6 +381,7 @@ func createMember(message MemberMessage, status Status) *Member {
 		Status:           status,
 		LastStatusChange: time.Now(),
 		Incarnation:      message.Incarnation,
+		IncarnationLock:  sync.RWMutex{},
 	}
 }
 

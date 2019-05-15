@@ -223,7 +223,7 @@ func (s *SWIM) createMembership() *pb.Membership {
 	}
 	for _, m := range s.memberMap.GetMembers() {
 		membership.MbrStatsMsgs = append(membership.MbrStatsMsgs, &pb.MbrStatsMsg{
-			Incarnation: m.Incarnation,
+			Incarnation: m.GetIncarnation(),
 			Id:          m.GetIDString(),
 			Type:        pb.MbrStatsMsg_Type(m.Status.Int()),
 			UdpAddress:  m.UDPAddress(),
@@ -342,12 +342,8 @@ func (s *SWIM) convMbrStatsToSuspectMsg(stats *pb.MbrStatsMsg) (SuspectMessage, 
 
 func (s *SWIM) refute(mbrStatsMsg *pb.MbrStatsMsg) {
 
-	accusedInc := mbrStatsMsg.Incarnation
-	inc := atomic.AddUint32(&s.member.Incarnation, 1)
-	if s.member.Incarnation >= accusedInc {
-		inc = atomic.AddUint32(&s.member.Incarnation, accusedInc-inc+1)
-	}
-	s.member.Incarnation = inc
+
+	inc := s.member.AddIncarnationAtomic(mbrStatsMsg.Incarnation)
 
 	// Update piggyBack's incarnation to store to pbkStore
 	mbrStatsMsg.Incarnation = inc
@@ -426,7 +422,11 @@ func (s *SWIM) startFailureDetector() {
 				s.probe(m, currentInterval)
 				periodTick++
 				if periodTick >= s.config.TryExchangeMembershipPeriod {
-					go s.exchangeMembership(m)
+					tcpM := s.memberMap.SelectKRandomMemberID(1,&s.member.ID)
+					if len(tcpM)>=1{
+						go s.exchangeMembership(tcpM[0])
+					}
+
 					periodTick = 0
 				}
 				iLogger.Info(nil, "[swim] done probing !"+s.member.ID.ID+"->"+m.ID.ID)
@@ -618,7 +618,7 @@ func (s *SWIM) indirectProbe(target *Member) error {
 func (s *SWIM) ping(target *Member) error {
 	var stats *pb.MbrStatsMsg = nil
 	if !s.mbrStatsMsgStore.IsEmpty() {
-		data, err := s.mbrStatsMsgStore.Get()
+		data, err := s.mbrStatsMsgStore.GetDstInfo(target.ID.ID)
 		stats = &data
 		if err != nil {
 			iLogger.Error(nil, err.Error())
@@ -653,7 +653,7 @@ func (s *SWIM) ping(target *Member) error {
 func (s *SWIM) indirectPing(mediator, target Member) (pb.Message, error) {
 	var stats *pb.MbrStatsMsg = nil
 	if !s.mbrStatsMsgStore.IsEmpty() {
-		data, err := s.mbrStatsMsgStore.Get()
+		data, err := s.mbrStatsMsgStore.GetDstInfo(target.ID.ID)
 		stats = &data
 		if err != nil {
 			iLogger.Error(nil, err.Error())
@@ -688,6 +688,17 @@ func (s *SWIM) suspect(member *Member, curProveInterval time.Duration) {
 	result, err := s.memberMap.Suspect(msg, curProveInterval)
 	if err != nil {
 		iLogger.Error(nil, err.Error())
+	}
+
+	if result{
+		statMsg := pb.MbrStatsMsg{
+			Type:                 pb.MbrStatsMsg_Suspect,
+			Id:                   msg.ID,
+			Incarnation:          msg.Incarnation,
+			UdpAddress:           member.UDPAddress(),
+			TcpAddress:           member.TCPAddress(),
+		}
+		s.mbrStatsMsgStore.Push(statMsg)
 	}
 
 	iLogger.Infof(nil, "Result of suspect [%t]", result)
@@ -742,7 +753,7 @@ func (s *SWIM) handlePing(msg pb.Message) {
 
 	var stats *pb.MbrStatsMsg = nil
 	if !s.mbrStatsMsgStore.IsEmpty() {
-		data, err := s.mbrStatsMsgStore.Get()
+		data, err := s.mbrStatsMsgStore.GetDstInfo(id)
 		stats = &data
 		if err != nil {
 			iLogger.Error(nil, err.Error())
@@ -770,7 +781,7 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 	// retrieve piggyback data from pbkStore
 	var stats *pb.MbrStatsMsg = nil
 	if !s.mbrStatsMsgStore.IsEmpty() {
-		data, err := s.mbrStatsMsgStore.Get()
+		data, err := s.mbrStatsMsgStore.GetDstInfo(id)
 		stats = &data
 		if err != nil {
 			iLogger.Error(nil, err.Error())
@@ -802,7 +813,7 @@ func (s *SWIM) handleIndirectPing(msg pb.Message) {
 
 	stats = nil
 	if !s.mbrStatsMsgStore.IsEmpty() {
-		data, err := s.mbrStatsMsgStore.Get()
+		data, err := s.mbrStatsMsgStore.GetDstInfo(id)
 		stats = &data
 		if err != nil {
 			iLogger.Error(nil, err.Error())
@@ -909,7 +920,7 @@ func createSuspectMessage(suspect *Member, confirmer string) SuspectMessage {
 			Addr:        suspect.Addr,
 			UDPPort:     suspect.UDPPort,
 			TCPPort:     suspect.TCPPort,
-			Incarnation: suspect.Incarnation,
+			Incarnation: suspect.GetIncarnation(),
 		},
 		ConfirmerID: confirmer,
 	}

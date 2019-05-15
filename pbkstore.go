@@ -42,6 +42,7 @@ type MbrStatsMsgStore interface {
 	Len() int
 	Push(pbk pb.MbrStatsMsg)
 	Get() (pb.MbrStatsMsg, error)
+	GetDstInfo(id string) (pb.MbrStatsMsg, error)
 	IsEmpty() bool
 }
 
@@ -84,7 +85,44 @@ func (p *PriorityMbrStatsMsgStore) Push(msg pb.MbrStatsMsg) {
 
 	heap.Push(&p.q, item)
 }
+func (p *PriorityMbrStatsMsgStore) GetDstInfo(id string) (pb.MbrStatsMsg, error) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
 
+	// Check empty
+	if len(p.q) == 0 {
+		return pb.MbrStatsMsg{}, ErrStoreEmpty
+	}
+
+	if idx := p.searchByStatMsgId(id); idx != -1 {
+		item := p.q[idx]
+		msg, ok := item.value.(pb.MbrStatsMsg)
+		if ok && msg.Type == pb.MbrStatsMsg_Suspect{
+			heap.Remove(&p.q, idx)
+			item.priority = item.priority + 1
+			if item.priority < p.maxLocalCount {
+				heap.Push(&p.q, item)
+			}
+			return msg,nil
+		}
+	}
+
+	// Pop from queue
+	item := heap.Pop(&p.q).(*Item)
+	msg, ok := item.value.(pb.MbrStatsMsg)
+	if !ok {
+		return pb.MbrStatsMsg{}, ErrPopInvalidType
+	}
+
+	// If an item has been retrieved by maxPriority, remove it.
+	// If not, push it again after increment priority
+	item.priority = item.priority + 1
+	if item.priority < p.maxLocalCount {
+		heap.Push(&p.q, item)
+	}
+
+	return msg, nil
+}
 // Return the mbrStatsMsg with the smallest local count in the list,
 // increment the local count and sort it again, not delete the data.
 func (p *PriorityMbrStatsMsgStore) Get() (pb.MbrStatsMsg, error) {

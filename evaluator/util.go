@@ -2,8 +2,8 @@ package evaluator
 
 import (
 	"github.com/DE-labtory/swim"
-	"strconv"
 	"net"
+	"strconv"
 	"time"
 )
 
@@ -42,39 +42,73 @@ func GetAvailablePortList(startPort int, num int) []int {
 	}
 }
 
-func SetupSwim(ip string, udpPort int, tcpPort int, id string) (*swim.SWIM, *swim.EvaluatorMessageEndpoint) {
+type SwimmerConfig struct {
+	ID                 string
+	IP                 string
+	UDPPort            int
+	TCPPort            int
+	ProbePeriodMillSec int // 800
+	AckTimeoutMillSec  int // 200
+	IndProbeNum        int // 3
+	MaxLocalCount      int // 5
+	MaxNsaCount        int // 5
+	SuspicionMaxNum    int // 3
+	SuspicionMinParam  int // 5
+	SuspicionMaxParam  int // 1
+	TCPTimeoutMillSec  int // 2000
+}
+
+func GetDefaultSwimmerConfig(id string,ip string, tcpPort int, udpPort int) SwimmerConfig {
+	return SwimmerConfig{
+		ID:                 id,
+		IP:                 ip,
+		UDPPort:            udpPort,
+		TCPPort:            tcpPort,
+		ProbePeriodMillSec: 700,
+		AckTimeoutMillSec:  200,
+		IndProbeNum:        1,
+		MaxLocalCount:      5,
+		MaxNsaCount:        5,
+		SuspicionMaxNum:    2,
+		SuspicionMinParam:  5,
+		SuspicionMaxParam:  1,
+		TCPTimeoutMillSec:  2000,
+	}
+}
+
+func SetupSwim(config SwimmerConfig) (*swim.SWIM, *swim.EvaluatorMessageEndpoint) {
 	swimConfig := swim.Config{
-		MaxlocalCount: 5,
-		MaxNsaCounter: 5,
-		T:             800,
-		AckTimeOut:    100,
-		K:             2,
-		BindAddress:   ip,
-		BindPort:      udpPort,
+		MaxlocalCount: config.MaxLocalCount,
+		MaxNsaCounter: config.MaxNsaCount,
+		T:             config.ProbePeriodMillSec,
+		AckTimeOut:    config.AckTimeoutMillSec,
+		K:             config.IndProbeNum,
+		BindAddress:   config.IP,
+		BindPort:      config.UDPPort,
 	}
 	suspicionConfig := swim.SuspicionConfig{
-		K:        3,
-		MinParam: 5,
-		MaxParam: 1,
+		K:        config.SuspicionMaxNum,
+		MinParam: config.SuspicionMinParam,
+		MaxParam: config.SuspicionMaxParam,
 	}
 	messageEndpointConfig := swim.MessageEndpointConfig{
 		EncryptionEnabled:       false,
-		SendTimeout:             100 * time.Millisecond,
+		SendTimeout:             time.Duration(config.AckTimeoutMillSec) * time.Millisecond,
 		CallbackCollectInterval: time.Minute,
 	}
 
 	tcpEndpointconfig := swim.TCPMessageEndpointConfig{
 		EncryptionEnabled: false,
-		TCPTimeout:        20 * time.Second,
-		IP:                ip,
-		Port:              tcpPort,
-		MyId:              swim.MemberID{ID: id},
+		TCPTimeout:        time.Duration(config.TCPTimeoutMillSec)*time.Millisecond,
+		IP:                config.IP,
+		Port:              config.TCPPort,
+		MyId:              swim.MemberID{ID: config.ID},
 	}
 	swimObj, msgEndpoint := swim.NewSwimForEvaluate(&swimConfig, &suspicionConfig, messageEndpointConfig, tcpEndpointconfig, &swim.Member{
-		ID:               swim.MemberID{ID: id},
-		Addr:             net.ParseIP(ip),
-		UDPPort:          uint16(udpPort),
-		TCPPort:          uint16(tcpPort),
+		ID:               swim.MemberID{ID: config.ID},
+		Addr:             net.ParseIP(config.IP),
+		UDPPort:          uint16(config.UDPPort),
+		TCPPort:          uint16(config.TCPPort),
 		Status:           swim.Alive,
 		LastStatusChange: time.Now(),
 		Incarnation:      0,
